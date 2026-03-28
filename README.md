@@ -81,7 +81,7 @@ sequenceDiagram
 
     Note over S: Daily at 3:00 AM UTC
     S->>Sync: compute_all_baselines()
-    Sync->>DB: Calculate 7-day rolling averages
+    Sync->>DB: Calculate 30-day rolling averages
 
     Note over S: Daily at 7:00 AM UTC
     S->>AI: generate_daily_briefs()
@@ -144,69 +144,78 @@ erDiagram
     Account ||--o{ AccountBaseline : has
     Account ||--o{ DailyBrief : has
     Account ||--o{ Recommendation : has
+    Account ||--o{ Insight : has
     Post ||--o{ PostMetric : has
     Post ||--o{ Insight : has
 
     Account {
         uuid id PK
         string platform
+        string platform_user_id
         string username
-        string full_name
+        string status
         int follower_count
-        int post_count
-        timestamp last_synced_at
+        timestamp created_at
     }
 
     Post {
         uuid id PK
         uuid account_id FK
         string platform_post_id
+        string platform
         string post_type
-        string caption
-        string permalink
+        text caption
+        text permalink
         timestamp posted_at
     }
 
     PostMetric {
         uuid id PK
         uuid post_id FK
+        timestamp snapshot_at
+        int views
         int likes
         int comments
         int shares
         int saves
-        int views
         int reach
-        timestamp recorded_at
+        numeric engagement_rate
+        numeric performance_score
     }
 
     AccountBaseline {
         uuid id PK
         uuid account_id FK
-        float avg_likes
-        float avg_comments
-        float avg_views
-        float avg_reach
+        timestamp computed_at
+        int period_days
+        jsonb baseline_data
     }
 
     DailyBrief {
         uuid id PK
         uuid account_id FK
-        text content
         date brief_date
+        text content
+        jsonb metrics_snapshot
     }
 
     Recommendation {
         uuid id PK
         uuid account_id FK
+        string recommendation_type
+        string title
         text content
-        string rec_type
+        int priority
+        string status
     }
 
     Insight {
         uuid id PK
         uuid post_id FK
-        text content
+        uuid account_id FK
         string insight_type
+        text content
+        jsonb metadata_json
     }
 ```
 
@@ -215,7 +224,7 @@ erDiagram
 | Layer | Technology |
 |-------|-----------|
 | Frontend | Next.js 15 (App Router), Tailwind CSS, SWR |
-| Backend | FastAPI, SQLAlchemy (async), Pydantic |
+| Backend | FastAPI, SQLAlchemy (async), Pydantic v2 |
 | Database | PostgreSQL 16, Redis 7 |
 | AI | Moonshot / Kimi API (OpenAI-compatible) |
 | Instagram | instagrapi (private mobile API) |
@@ -228,7 +237,7 @@ erDiagram
 ### 1. Clone and configure
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/rmadrazo97/SOCIAL-MEDIA-AGENT.git
 cd SOCIAL-MEDIA-AGENT
 cp .env.example .env
 ```
@@ -242,7 +251,7 @@ APP_PASSWORD=your_dashboard_password
 INSTAGRAM_USERNAME=your_instagram_username
 INSTAGRAM_PASSWORD=your_instagram_password
 
-# AI features
+# AI features (Moonshot/Kimi - OpenAI compatible)
 MOONSHOT_API_KEY=your_moonshot_api_key
 
 # Optional: residential proxy for TikTok (datacenter IPs get blocked)
@@ -261,10 +270,18 @@ docker compose up --build -d
 - **Backend API**: http://localhost:8001
 - **Health check**: http://localhost:8001/health
 
-### 4. Add accounts
+### 4. Expose publicly (optional)
+
+The frontend proxies API requests via Next.js rewrites, so a single tunnel exposes everything:
+
+```bash
+ngrok http 3001
+```
+
+### 5. Add accounts
 
 1. Log in with your `APP_PASSWORD`
-2. Go to **Accounts** → **Add Account**
+2. Go to **Accounts** > **Add Account**
 3. Enter a username and select the platform (instagram/tiktok)
 4. Hit **Sync Now** to trigger an immediate data pull
 
@@ -282,27 +299,68 @@ docker compose up --build -d
 | Job | Schedule | Description |
 |-----|----------|-------------|
 | Sync all accounts | Every 2 hours | Scrape new posts and metrics |
-| Compute baselines | 3:00 AM UTC | Calculate 7-day rolling averages |
+| Compute baselines | 3:00 AM UTC | Calculate 30-day rolling averages |
 | Generate briefs | 7:00 AM UTC | AI-generated daily performance summaries |
 | Generate recommendations | 7:30 AM UTC | AI content strategy suggestions |
 
-## API Endpoints
+## API Reference
 
+### Auth
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/auth/login` | Authenticate with password |
+
+### Accounts
+| Method | Path | Description |
+|--------|------|-------------|
 | GET | `/api/accounts` | List all accounts |
 | POST | `/api/accounts` | Add an account |
-| GET | `/api/accounts/{id}/posts` | Get posts for an account |
-| GET | `/api/accounts/{id}/metrics` | Get metric timeseries |
-| GET | `/api/accounts/{id}/brief` | Get latest daily brief |
-| GET | `/api/accounts/{id}/recommendations` | Get AI recommendations |
-| POST | `/api/accounts/{id}/sync` | Trigger manual sync |
+| GET | `/api/accounts/{id}` | Get account details |
+| DELETE | `/api/accounts/{id}` | Remove an account |
+
+### Posts
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/accounts/{id}/posts` | Get posts (query: platform, post_type, limit, offset) |
+| POST | `/api/posts` | Create a post manually |
+| GET | `/api/posts/{id}` | Get post with latest metrics |
+| DELETE | `/api/posts/{id}` | Delete a post |
+| GET | `/api/posts/{id}/metrics` | Get metric history (snapshots) |
+| POST | `/api/posts/{id}/metrics` | Add a metric snapshot |
+
+### AI & Insights
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/posts/{id}/diagnostic` | Get cached AI diagnostic |
+| POST | `/api/posts/{id}/diagnostic` | Generate new AI diagnostic |
+| GET | `/api/accounts/{id}/insights` | List account insights |
+| POST | `/api/posts/{id}/remix` | Generate content remix (body: `{remix_type}`) |
+
+### Briefs & Recommendations
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/accounts/{id}/brief` | Get today's brief |
+| POST | `/api/accounts/{id}/brief` | Generate today's brief |
+| GET | `/api/accounts/{id}/briefs` | List recent briefs |
+| GET | `/api/accounts/{id}/recommendations` | Get recommendations (query: status) |
+| PATCH | `/api/recommendations/{id}` | Update recommendation status |
+
+### Metrics & Baselines
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/accounts/{id}/metrics` | Aggregated metrics (query: days=7) |
+| GET | `/api/accounts/{id}/baseline` | Get latest baseline |
+
+### Sync & Import
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/accounts/{id}/sync` | Sync one account |
 | POST | `/api/sync/all` | Sync all accounts |
-| GET | `/api/posts/{id}` | Get post details |
-| POST | `/api/posts/{id}/insights` | Generate AI diagnostic |
-| POST | `/api/posts/{id}/remix` | Generate content remix |
-| POST | `/api/csv/import` | Import accounts from CSV |
+| POST | `/api/sync/baselines` | Recompute baselines |
+| POST | `/api/sync/briefs` | Generate all briefs |
+| POST | `/api/sync/recommendations` | Generate all recommendations |
+| GET | `/api/sync/status` | Get sync status |
+| POST | `/api/accounts/{id}/import` | Import CSV (multipart form) |
 
 ## Platform Notes
 
@@ -310,20 +368,20 @@ docker compose up --build -d
 - Uses **instagrapi** (Instagram private mobile API)
 - Requires real Instagram credentials in `.env`
 - First login from Docker may trigger a verification challenge — temporarily disable 2FA or approve the new device
-- Session is persisted to avoid re-login on restart
-- Consider using a secondary account to avoid rate limits on your main account
+- Session is persisted to `/app/ig_session.json` to avoid re-login
+- Consider using a secondary account to avoid rate limits
 
 ### TikTok
 - Uses **httpx** for HTTP-based scraping (no browser needed)
 - No login required — works with public profiles
-- Primary method: extracts embedded JSON from TikTok HTML pages
+- Primary: extracts `__UNIVERSAL_DATA_FOR_REHYDRATION__` JSON from HTML
 - Fallback: oembed API for basic profile info (no video metrics)
-- TikTok aggressively blocks datacenter IPs — configure `TIKTOK_PROXY` with a residential proxy for full data
-- Full scraping (with video metrics) works from residential IPs
+- TikTok blocks datacenter IPs — configure `TIKTOK_PROXY` for full data
+- Full scraping works from residential IPs
 
 ## Color Palette
 
-The UI uses a nature-inspired color palette:
+Nature-inspired UI palette:
 
 | Name | Hex | Usage |
 |------|-----|-------|
@@ -338,24 +396,30 @@ The UI uses a nature-inspired color palette:
 ```
 ├── backend/
 │   ├── app/
-│   │   ├── api/          # FastAPI route handlers
-│   │   ├── integrations/ # Instagram & TikTok scrapers
-│   │   ├── models/       # SQLAlchemy models
-│   │   ├── schemas/      # Pydantic schemas
-│   │   ├── services/     # Business logic (sync, AI, baselines)
-│   │   └── workers/      # APScheduler setup
+│   │   ├── api/            # FastAPI route handlers
+│   │   ├── integrations/   # Instagram & TikTok scrapers
+│   │   ├── models/         # SQLAlchemy ORM models
+│   │   ├── schemas/        # Pydantic request/response schemas
+│   │   ├── services/       # Business logic (sync, AI, baselines)
+│   │   ├── workers/        # APScheduler cron setup
+│   │   ├── config.py       # Pydantic Settings (env vars)
+│   │   ├── database.py     # Async SQLAlchemy engine
+│   │   └── main.py         # FastAPI app entry point
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── app/          # Next.js pages (App Router)
-│   │   ├── components/   # React components
-│   │   ├── lib/          # API client, hooks
-│   │   └── styles/       # Global CSS
-│   ├── Dockerfile
-│   └── tailwind.config.js
-├── docs/prds/            # Product requirement documents
+│   │   ├── app/            # Next.js App Router pages
+│   │   ├── components/     # React components
+│   │   ├── lib/            # API client, SWR hooks
+│   │   └── styles/         # Global CSS + Tailwind
+│   ├── next.config.js      # API proxy rewrites
+│   ├── tailwind.config.js  # Custom color palette
+│   └── Dockerfile
+├── docs/prds/              # Product requirement documents
+├── scripts/                # Utility scripts
 ├── docker-compose.yml
+├── CLAUDE.md               # Agent development guide
 └── .env
 ```
 
