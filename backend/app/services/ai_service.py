@@ -17,7 +17,7 @@ class AIService:
         if openai_available and settings.MOONSHOT_API_KEY:
             self.client = AsyncOpenAI(
                 api_key=settings.MOONSHOT_API_KEY,
-                base_url="https://api.moonshot.cn/v1",
+                base_url="https://api.moonshot.ai/v1",
             )
 
     async def _call_llm(self, system_prompt: str, user_prompt: str, model: str = "moonshot-v1-8k") -> dict:

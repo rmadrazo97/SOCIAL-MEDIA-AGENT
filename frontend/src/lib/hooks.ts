@@ -37,3 +37,19 @@ export function useArtifacts(params?: { account_id?: string; artifact_type?: str
   const key = params ? `artifacts-${params.account_id || 'all'}-${params.artifact_type || 'all'}` : 'artifacts';
   return useSWR(key, () => api.getArtifacts(params));
 }
+
+export function useProfileHistory(accountId: string | null, limit = 90) {
+  return useSWR(accountId ? `profile-history-${accountId}` : null, () => api.getProfileHistory(accountId!, limit));
+}
+
+export function useAccountGrowth(accountId: string | null, days = 30) {
+  return useSWR(accountId ? `growth-${accountId}-${days}` : null, () => api.getAccountGrowth(accountId!, days));
+}
+
+export function usePostComments(postId: string | null) {
+  return useSWR(postId ? `comments-${postId}` : null, () => api.getPostComments(postId!));
+}
+
+export function usePostMedia(postId: string | null) {
+  return useSWR(postId ? `media-${postId}` : null, () => api.getPostMedia(postId!));
+}

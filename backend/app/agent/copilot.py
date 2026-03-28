@@ -28,7 +28,7 @@ class AgentState(CopilotKitState):
 async def chat_node(state: AgentState, config: RunnableConfig) -> Command[Literal["tool_node", "__end__"]]:
     """Main chat node — invokes the LLM with tools bound."""
     llm = ChatOpenAI(
-        base_url="https://api.moonshot.cn/v1",
+        base_url="https://api.moonshot.ai/v1",
         api_key=settings.MOONSHOT_API_KEY or "dummy-key",
         model="moonshot-v1-8k",
         temperature=0.3,

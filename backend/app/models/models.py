@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, date
 
-from sqlalchemy import String, Text, Integer, DateTime, Date, Numeric, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import Boolean, Float, String, Text, Integer, DateTime, Date, Numeric, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -21,6 +21,10 @@ class Account(Base):
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="active")
     follower_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    following_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    biography: Mapped[str | None] = mapped_column(Text, nullable=True)
+    profile_pic_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     posts: Mapped[list["Post"]] = relationship(back_populates="account", cascade="all, delete-orphan")
@@ -28,6 +32,7 @@ class Account(Base):
     recommendations: Mapped[list["Recommendation"]] = relationship(back_populates="account", cascade="all, delete-orphan")
     daily_briefs: Mapped[list["DailyBrief"]] = relationship(back_populates="account", cascade="all, delete-orphan")
     baselines: Mapped[list["AccountBaseline"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+    profile_snapshots: Mapped[list["ProfileSnapshot"]] = relationship(back_populates="account", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("platform", "username", name="uq_account_platform_username"),
@@ -46,11 +51,17 @@ class Post(Base):
     media_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     permalink: Mapped[str | None] = mapped_column(Text, nullable=True)
     posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    location_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tagged_users: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    media_stored: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    carousel_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    video_duration: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     account: Mapped["Account"] = relationship(back_populates="posts")
     metrics: Mapped[list["PostMetric"]] = relationship(back_populates="post", cascade="all, delete-orphan")
     insights: Mapped[list["Insight"]] = relationship(back_populates="post", cascade="all, delete-orphan")
+    comments: Mapped[list["PostComment"]] = relationship(back_populates="post", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("account_id", "platform_post_id", name="uq_post_account_platform_id"),
@@ -196,4 +207,43 @@ class AgentMemoryEntry(Base):
 
     __table_args__ = (
         Index("ix_agent_memory_account_type", "account_id", "memory_type"),
+    )
+
+
+class ProfileSnapshot(Base):
+    __tablename__ = "profile_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"))
+    follower_count: Mapped[int] = mapped_column(Integer, default=0)
+    following_count: Mapped[int] = mapped_column(Integer, default=0)
+    post_count: Mapped[int] = mapped_column(Integer, default=0)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    account: Mapped["Account"] = relationship(back_populates="profile_snapshots")
+
+    __table_args__ = (
+        Index("ix_profile_snapshots_account_at", "account_id", "snapshot_at"),
+    )
+
+
+class PostComment(Base):
+    __tablename__ = "post_comments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    post_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("posts.id", ondelete="CASCADE"))
+    platform_comment_id: Mapped[str] = mapped_column(String(255))
+    username: Mapped[str] = mapped_column(String(255))
+    text: Mapped[str] = mapped_column(Text)
+    comment_like_count: Mapped[int] = mapped_column(Integer, default=0)
+    reply_count: Mapped[int] = mapped_column(Integer, default=0)
+    parent_comment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("post_comments.id", ondelete="CASCADE"), nullable=True)
+    commented_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    post: Mapped["Post"] = relationship(back_populates="comments")
+
+    __table_args__ = (
+        UniqueConstraint("post_id", "platform_comment_id", name="uq_comment_post_platform_id"),
+        Index("ix_post_comments_post_at", "post_id", "commented_at"),
     )

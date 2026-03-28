@@ -64,6 +64,12 @@ H = -H "X-App-Password: $(PW)"
 sync-all: ## Trigger sync for all accounts
 	@curl -s -X POST $(API)/api/sync/all $(H) | python3 -m json.tool
 
+ig-sync: ## Run Instagram sync from host (uses browser session)
+	@python3 scripts/ig_sync.py
+
+ig-sync-account: ## Sync specific Instagram account (usage: make ig-sync-account USERNAME=alexmadrazo97)
+	@python3 scripts/ig_sync.py --username $(USERNAME)
+
 baselines: ## Recompute performance baselines
 	@curl -s -X POST $(API)/api/sync/baselines $(H) | python3 -m json.tool
 

@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     TIKTOK_PROXY: str = ""
     ENCRYPTION_KEY: str = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
 
+    # Instagram Web Session (browser cookie-based scraping)
+    INSTAGRAM_SESSION_ID: str = ""
+    INSTAGRAM_CSRF_TOKEN: str = ""
+    INSTAGRAM_SYNC_DELAY_MIN: int = 2
+    INSTAGRAM_SYNC_DELAY_MAX: int = 5
+    INSTAGRAM_SYNC_BATCH_SIZE: int = 50
+    INSTAGRAM_MEDIA_DIR: str = "/data/media"
+
     class Config:
         env_file = ".env"
 

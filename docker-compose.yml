@@ -35,6 +35,9 @@ services:
       MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
       INSTAGRAM_USERNAME: ${INSTAGRAM_USERNAME:-}
       INSTAGRAM_PASSWORD: ${INSTAGRAM_PASSWORD:-}
+      INSTAGRAM_SESSION_ID: ${INSTAGRAM_SESSION_ID:-}
+      INSTAGRAM_CSRF_TOKEN: ${INSTAGRAM_CSRF_TOKEN:-}
+      INSTAGRAM_MEDIA_DIR: /data/media
       TIKTOK_CLIENT_KEY: ${TIKTOK_CLIENT_KEY:-}
       TIKTOK_CLIENT_SECRET: ${TIKTOK_CLIENT_SECRET:-}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
@@ -47,6 +50,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - media_data:/data/media
     command: >
       sh -c "python -m app.init_db && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
@@ -66,3 +70,4 @@ services:
 
 volumes:
   pgdata:
+  media_data:

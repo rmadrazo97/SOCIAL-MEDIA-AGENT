@@ -165,6 +165,29 @@ class ApiClient {
     return this.fetch(`/api/artifacts/${id}`, { method: 'DELETE' });
   }
 
+  // Profile History & Growth
+  async getProfileHistory(accountId: string, limit = 90) {
+    return this.fetch(`/api/accounts/${accountId}/profile-history?limit=${limit}`);
+  }
+  async getAccountGrowth(accountId: string, days = 30) {
+    return this.fetch(`/api/accounts/${accountId}/growth?days=${days}`);
+  }
+
+  // Comments
+  async getPostComments(postId: string, limit = 50) {
+    return this.fetch(`/api/posts/${postId}/comments?limit=${limit}`);
+  }
+
+  // Media
+  async getPostMedia(postId: string) {
+    return this.fetch(`/api/posts/${postId}/media`);
+  }
+
+  // Session check
+  async checkInstagramSession() {
+    return this.fetch('/api/sync/session-check');
+  }
+
   // CSV Import
   async importCsv(accountId: string, file: File) {
     const formData = new FormData();

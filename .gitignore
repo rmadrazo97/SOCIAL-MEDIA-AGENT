@@ -24,5 +24,8 @@ Thumbs.db
 # Docker
 pgdata/
 
+# Data (downloaded media)
+data/
+
 # Backups
 backups/

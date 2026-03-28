@@ -24,9 +24,14 @@ class AccountCreate(BaseModel):
 class AccountOut(BaseModel):
     id: UUID
     platform: str
+    platform_user_id: str | None = None
     username: str
     status: str
     follower_count: int | None
+    following_count: int | None = None
+    biography: str | None = None
+    profile_pic_url: str | None = None
+    last_sync_at: datetime | None = None
     created_at: datetime
 
     class Config:
@@ -53,6 +58,11 @@ class PostOut(BaseModel):
     media_url: str | None
     permalink: str | None
     posted_at: datetime
+    location_name: str | None = None
+    tagged_users: list[str] | None = None
+    media_stored: bool = False
+    carousel_count: int = 0
+    video_duration: float | None = None
     created_at: datetime
 
     class Config:
@@ -218,6 +228,36 @@ class AgentConversationOut(BaseModel):
     summary: str | None
     created_at: datetime
     last_active_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Profile Snapshot
+class ProfileSnapshotOut(BaseModel):
+    id: UUID
+    account_id: UUID
+    follower_count: int
+    following_count: int
+    post_count: int
+    snapshot_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Post Comment
+class PostCommentOut(BaseModel):
+    id: UUID
+    post_id: UUID
+    platform_comment_id: str
+    username: str
+    text: str
+    comment_like_count: int
+    reply_count: int
+    parent_comment_id: UUID | None
+    commented_at: datetime
+    created_at: datetime
 
     class Config:
         from_attributes = True

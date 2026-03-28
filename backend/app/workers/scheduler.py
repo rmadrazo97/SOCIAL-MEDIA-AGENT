@@ -21,12 +21,13 @@ scheduler = AsyncIOScheduler()
 def setup_scheduler():
     """Register all cron jobs."""
 
-    # Sync all accounts every 2 hours
+    # Sync non-Instagram accounts every 6 hours from Docker
+    # Instagram sync runs from the host via scripts/ig_sync.py (session is IP-bound)
     scheduler.add_job(
         job_sync_all,
-        IntervalTrigger(hours=2),
+        IntervalTrigger(hours=6),
         id="sync_all_accounts",
-        name="Sync all accounts (scrape new data)",
+        name="Sync non-Instagram accounts (scrape new data)",
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc),  # Run immediately on startup
     )
@@ -59,7 +60,7 @@ def setup_scheduler():
     )
 
     scheduler.start()
-    logger.info("Scheduler started with jobs: sync (2h), baselines (3am), briefs (7am), recommendations (7:30am)")
+    logger.info("Scheduler started with jobs: sync (6h), baselines (3am), briefs (7am), recommendations (7:30am)")
 
 
 async def job_sync_all():
