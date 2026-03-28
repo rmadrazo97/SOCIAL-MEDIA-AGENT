@@ -33,7 +33,7 @@ A single `ngrok http 3001` exposes the full app publicly.
 - **Backend**: Python 3.12, FastAPI, SQLAlchemy 2.0 (async + asyncpg), Pydantic v2, APScheduler
 - **Frontend**: Next.js 15 (App Router), TypeScript, Tailwind CSS, SWR
 - **Database**: PostgreSQL 16, Redis 7
-- **AI**: Moonshot/Kimi API (OpenAI-compatible client at `https://api.moonshot.cn/v1`, model `moonshot-v1-8k`)
+- **AI**: Moonshot/Kimi API (OpenAI-compatible client at `https://api.moonshot.ai/v1`, model `moonshot-v1-8k`)
 - **Co-Pilot Agent**: LangGraph + CopilotKit (floating chat widget, LangChain tools for data access)
 - **Scraping**: instagrapi (Instagram), httpx + BeautifulSoup (TikTok)
 - **Infra**: Docker Compose with hot reload
@@ -218,7 +218,7 @@ Defined in `backend/app/workers/scheduler.py`:
 
 ## AI Service (`services/ai_service.py`)
 
-- Uses OpenAI Python client pointed at `https://api.moonshot.cn/v1`
+- Uses OpenAI Python client pointed at `https://api.moonshot.ai/v1`
 - Model: `moonshot-v1-8k`
 - Falls back to mock/template responses if API key is missing or call fails
 - All prompts request JSON responses

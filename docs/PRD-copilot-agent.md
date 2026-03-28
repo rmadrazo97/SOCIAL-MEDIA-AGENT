@@ -41,7 +41,7 @@ Deep Agents provide the core agent harness with built-in capabilities that map d
 | **Subagent Spawning** (`task` tool) | Delegate specialized work — one subagent for trend analysis, another for content generation — with context isolation |
 | **Long-term Memory** (LangGraph Memory Store) | Persist creator preferences, past interactions, learned patterns across sessions |
 
-**LLM Backend**: Moonshot/Kimi API (`moonshot-v1-8k`) via the existing OpenAI-compatible client at `https://api.moonshot.cn/v1` — reusing the `MOONSHOT_API_KEY` already configured in the project.
+**LLM Backend**: Moonshot/Kimi API (`moonshot-v1-8k`) via the existing OpenAI-compatible client at `https://api.moonshot.ai/v1` — reusing the `MOONSHOT_API_KEY` already configured in the project.
 
 ### 2.2 Frontend UI: CopilotKit + AG-UI Protocol
 
@@ -422,7 +422,7 @@ def create_copilot_agent():
     """Create the Social Media Co-Pilot Deep Agent."""
 
     llm = ChatOpenAI(
-        base_url="https://api.moonshot.cn/v1",
+        base_url="https://api.moonshot.ai/v1",
         api_key=settings.MOONSHOT_API_KEY,
         model="moonshot-v1-8k",
     )
