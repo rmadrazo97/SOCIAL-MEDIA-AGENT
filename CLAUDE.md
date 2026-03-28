@@ -250,6 +250,57 @@ TIKTOK_CLIENT_SECRET=
 3. Return structured JSON from the LLM
 4. Add API endpoint to expose it
 
+## Slash Commands (`.claude/commands/`)
+
+These are available as `/command` in Claude Code:
+
+| Command | Purpose |
+|---------|---------|
+| `/status` | Check health of all services and data counts |
+| `/deploy` | Build, restart, and verify the stack after changes |
+| `/sync` | Trigger data sync and report results |
+| `/debug` | Debug an issue — gathers logs, checks services, tests endpoints |
+| `/review` | Review recent changes for correctness and completeness |
+| `/feature` | Plan and implement a full feature end-to-end |
+| `/add-endpoint` | Add a new API endpoint (schema → route → frontend) |
+| `/add-model` | Add a new database model with schema and migration |
+| `/add-page` | Add a new frontend dashboard page |
+| `/add-platform` | Add support for a new social media platform |
+| `/add-ai-feature` | Add a new AI-powered feature |
+| `/db-inspect` | Inspect database tables, counts, and recent activity |
+
+## Makefile Targets
+
+Run `make help` for the full list. Key targets:
+
+```bash
+make up                # Start all services
+make build             # Build and start (after Dockerfile changes)
+make logs              # Tail all logs
+make logs-backend      # Tail backend logs only
+make status            # Container health + API check
+make sync-all          # Trigger sync for all accounts
+make baselines         # Recompute performance baselines
+make briefs            # Generate AI daily briefs
+make recs              # Generate AI recommendations
+make db-shell          # Open psql shell
+make db-counts         # Show row counts for all tables
+make db-reset          # Drop and recreate tables (DESTRUCTIVE)
+make db-dump           # Backup database to SQL file
+make seed              # Populate DB with sample data
+make tunnel            # Expose frontend via ngrok
+make clean             # Remove containers, volumes, build cache
+```
+
+## Scripts (`scripts/`)
+
+| Script | Purpose |
+|--------|---------|
+| `health_check.sh` | Full health check with colored output |
+| `backup_db.sh` | Backup database to `backups/` (keeps last 10) |
+| `restore_db.sh` | Restore database from a backup file |
+| `seed_sample_data.py` | Populate DB with sample posts and metrics |
+
 ## Common Commands
 
 ```bash
