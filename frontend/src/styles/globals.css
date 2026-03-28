@@ -18,3 +18,23 @@ body {
   background: #737A5D;
   border-radius: 3px;
 }
+
+/* CopilotKit theme override */
+.copilot-popup-custom {
+  --copilot-primary-color: #A4AC86;
+  --copilot-background-color: #414833;
+  --copilot-text-color: #EBE3D2;
+  --copilot-border-color: #CCBFA3;
+  --copilot-response-button-background-color: #737A5D;
+  --copilot-response-button-color: #EBE3D2;
+}
+
+/* Override CopilotKit popup styles for dark theme */
+[data-copilotkit-popup] {
+  --copilot-primary-color: #A4AC86 !important;
+}
+
+.copilotKitPopup,
+[class*="copilotKit"] {
+  font-family: inherit;
+}

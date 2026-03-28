@@ -8,6 +8,14 @@ const nextConfig = {
         source: '/api/:path*',
         destination: `${backendUrl}/api/:path*`,
       },
+      {
+        source: '/copilotkit',
+        destination: `${backendUrl}/copilotkit/`,
+      },
+      {
+        source: '/copilotkit/:path*',
+        destination: `${backendUrl}/copilotkit/:path*`,
+      },
     ];
   },
 }

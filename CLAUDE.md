@@ -25,7 +25,7 @@ docker compose down               # Stop everything
 - PostgreSQL: localhost:5433 (user: smadmin, db: social_media_agent)
 - Redis: localhost:6380
 
-The frontend proxies `/api/*` to the backend via Next.js rewrites (see `frontend/next.config.js`).
+The frontend proxies `/api/*` and `/copilotkit/*` to the backend via Next.js rewrites (see `frontend/next.config.js`).
 A single `ngrok http 3001` exposes the full app publicly.
 
 ## Tech Stack
@@ -34,6 +34,7 @@ A single `ngrok http 3001` exposes the full app publicly.
 - **Frontend**: Next.js 15 (App Router), TypeScript, Tailwind CSS, SWR
 - **Database**: PostgreSQL 16, Redis 7
 - **AI**: Moonshot/Kimi API (OpenAI-compatible client at `https://api.moonshot.cn/v1`, model `moonshot-v1-8k`)
+- **Co-Pilot Agent**: LangGraph + CopilotKit (floating chat widget, LangChain tools for data access)
 - **Scraping**: instagrapi (Instagram), httpx + BeautifulSoup (TikTok)
 - **Infra**: Docker Compose with hot reload
 
@@ -41,6 +42,10 @@ A single `ngrok http 3001` exposes the full app publicly.
 
 ```
 Browser → Next.js (3001) → [/api/* rewrite] → FastAPI (8001) → PostgreSQL (5432)
+                         → [/copilotkit/* rewrite] → CopilotKit SDK (FastAPI)
+                                                     ↓
+                                              LangGraph Co-Pilot Agent
+                                              (14 tools: query + action)
                                                      ↓
                                               APScheduler (cron)
                                                      ↓
@@ -62,7 +67,7 @@ There are no user accounts, sessions, or JWTs.
 | `config.py` | `Settings(BaseSettings)` — all env vars loaded here |
 | `database.py` | Async SQLAlchemy engine, `get_db()` dependency |
 | `init_db.py` | Creates tables on startup (called in docker CMD) |
-| `models/models.py` | 7 SQLAlchemy models: Account, Post, PostMetric, Insight, Recommendation, DailyBrief, AccountBaseline |
+| `models/models.py` | 10 SQLAlchemy models: Account, Post, PostMetric, Insight, Recommendation, DailyBrief, AccountBaseline, Artifact, AgentConversation, AgentMemoryEntry |
 | `schemas/schemas.py` | All Pydantic request/response schemas |
 | `api/auth.py` | `POST /api/auth/login` |
 | `api/accounts.py` | CRUD for accounts |
@@ -82,6 +87,12 @@ There are no user accounts, sessions, or JWTs.
 | `services/baseline_service.py` | 30-day baseline computation |
 | `services/brief_worker.py` | Batch brief + recommendation generation |
 | `workers/scheduler.py` | APScheduler job setup (4 cron jobs) |
+| `agent/copilot.py` | LangGraph Co-Pilot agent definition (StateGraph + CopilotKitState) |
+| `agent/tools/query_tools.py` | 8 read-only tools: accounts, posts, metrics, baselines, briefs, recommendations, artifacts |
+| `agent/tools/action_tools.py` | 6 action tools: sync, diagnostic, brief generation, recommendation status, artifact CRUD |
+| `agent/prompts/system.py` | Co-Pilot system prompt (persona, guidelines, capabilities) |
+| `api/agent.py` | `register_copilotkit()` — registers CopilotKit SDK endpoint on FastAPI |
+| `api/artifacts.py` | CRUD endpoints for artifacts (content ideas, strategies, reports, etc.) |
 
 ### Frontend (`frontend/src/`)
 
@@ -92,7 +103,7 @@ There are no user accounts, sessions, or JWTs.
 | `app/page.tsx` | Root redirect to `/login` or `/dashboard` |
 | `app/login/page.tsx` | Password login form |
 | `app/dashboard/page.tsx` | Main dashboard: metrics cards, brief, recommendations, recent posts |
-| `app/dashboard/layout.tsx` | Dashboard shell with sidebar navigation |
+| `app/dashboard/layout.tsx` | Dashboard shell with CopilotKit provider + floating chat popup |
 | `app/dashboard/accounts/page.tsx` | Account management: add, sync, CSV import, delete |
 | `app/dashboard/posts/page.tsx` | Posts table with filtering |
 | `app/dashboard/posts/[id]/page.tsx` | Post detail: metrics, history, AI diagnostic, remix |
@@ -151,6 +162,23 @@ All models use UUID primary keys. All timestamps are timezone-aware.
 - `period_days` (int, default 30)
 - `baseline_data` (JSONB): `{avg_views, avg_likes, avg_comments, avg_shares, avg_saves, avg_engagement_rate, post_count, median_views, by_type, by_day, by_hour}`
 
+### Artifact
+- `account_id` → Account (cascade, nullable)
+- `artifact_type` (string): "content_idea", "copy_draft", "strategy", "report", "trend_analysis", "task"
+- `title` (string), `content` (text), `metadata_json` (JSONB)
+- `status` (string): "active", "archived", "completed"
+
+### AgentConversation
+- `thread_id` (string, unique): LangGraph thread ID
+- `account_id` → Account (cascade, nullable)
+- `summary` (text, nullable)
+
+### AgentMemoryEntry
+- `account_id` → Account (cascade, nullable)
+- `memory_type` (string): "creator_profile", "insight", "preference", "pattern"
+- `key` (string, indexed), `content` (text)
+- `confidence` (numeric 3,2, default 1.0)
+
 ## API Conventions
 
 - All endpoints except `/api/auth/login` and `/health` require the `X-App-Password` header
@@ -159,6 +187,8 @@ All models use UUID primary keys. All timestamps are timezone-aware.
 - List endpoints return arrays directly (not paginated wrappers)
 - Posts endpoints return `PostWithMetrics` which includes `latest_metrics` (most recent PostMetric snapshot)
 - Background tasks (sync, briefs) return `{"status": "..._started"}` immediately
+- CopilotKit agent endpoint at `/copilotkit` (registered by `register_copilotkit()`, not a standard API router)
+- Artifact CRUD at `/api/artifacts` (GET, POST, PATCH, DELETE)
 
 ## Scheduler Jobs
 
@@ -194,6 +224,34 @@ Defined in `backend/app/workers/scheduler.py`:
 - All prompts request JSON responses
 - Methods: `generate_diagnostic()`, `generate_daily_brief()`, `generate_recommendations()`, `generate_remix()`
 
+## Co-Pilot Agent (`agent/`)
+
+Conversational AI assistant embedded as a floating chat widget on all dashboard pages.
+
+- **Framework**: LangGraph `StateGraph` with `CopilotKitState` base, served via CopilotKit Python SDK
+- **LLM**: Same Moonshot/Kimi API as AI Service (`moonshot-v1-8k`)
+- **Endpoint**: `/copilotkit` (registered via `add_fastapi_endpoint()`, not a standard FastAPI router)
+- **Frontend**: `<CopilotKit>` provider + `<CopilotPopup>` in `dashboard/layout.tsx`
+- **Tools access the DB directly** via SQLAlchemy (not HTTP calls) to avoid deadlock with single-worker uvicorn
+
+### Agent Tools (14 total)
+
+**Query tools** (8 — read-only):
+`get_accounts`, `get_account_metrics`, `get_account_baseline`, `get_posts`, `get_post_detail`, `get_daily_brief`, `get_recommendations`, `list_artifacts`
+
+**Action tools** (6 — mutate state):
+`trigger_sync`, `generate_post_diagnostic`, `generate_brief`, `update_recommendation_status`, `save_artifact`, `retrieve_artifact`
+
+### Adding a new Co-Pilot tool
+1. Create tool function with `@tool` decorator in `backend/app/agent/tools/query_tools.py` (read) or `action_tools.py` (write)
+2. Add it to the `query_tools` or `action_tools` list at the bottom of the file
+3. It is automatically included via `all_tools` in `agent/tools/__init__.py`
+4. Rebuild backend: `docker compose up --build -d backend`
+
+### Key dependencies
+- Backend: `copilotkit`, `langgraph`, `langchain-openai`, `langchain-core`, `ag-ui-langgraph`
+- Frontend: `@copilotkit/react-core`, `@copilotkit/react-ui`
+
 ## Environment Variables
 
 Required in `.env` at project root:
@@ -224,6 +282,7 @@ TIKTOK_CLIENT_SECRET=
 - Dark/muted nature theme — use `bg-ebony`, `text-bone`, `border-dun`, `bg-reseda`, `text-sage` etc.
 - Icons: Lucide React
 - No external UI library — plain Tailwind + custom components
+- Co-Pilot chat: CopilotKit `CopilotPopup` (bottom-right floating widget), themed via CSS variables in `globals.css`
 
 ## Development Patterns
 
@@ -249,6 +308,13 @@ TIKTOK_CLIENT_SECRET=
 2. Define system + user prompt templates
 3. Return structured JSON from the LLM
 4. Add API endpoint to expose it
+
+### Adding a new Co-Pilot agent tool
+1. Add `@tool` function in `backend/app/agent/tools/query_tools.py` (read) or `action_tools.py` (write)
+2. Append to the `query_tools` or `action_tools` list at the bottom of the file
+3. Tool auto-registers via `all_tools` in `agent/tools/__init__.py`
+4. Use `async with async_session() as session:` for DB access (not HTTP calls)
+5. Return `json.dumps(...)` — agent receives tool output as a string
 
 ## Slash Commands (`.claude/commands/`)
 
@@ -321,6 +387,12 @@ curl -X POST http://localhost:8001/api/sync/baselines -H "X-App-Password: admin1
 
 # Check scheduler status
 docker compose logs backend --tail 20 | grep -i "scheduler\|cron\|sync"
+
+# Verify Co-Pilot agent is registered
+docker compose logs backend --tail 30 | grep -i "copilot\|CopilotKit"
+
+# Rebuild frontend with fresh node_modules (after adding npm packages)
+docker compose up --build -V -d frontend
 ```
 
 ## Known Limitations
@@ -330,3 +402,6 @@ docker compose logs backend --tail 20 | grep -i "scheduler\|cron\|sync"
 3. **No migrations**: Tables are created via `Base.metadata.create_all()`. Schema changes require manual migration or DB reset.
 4. **Single user**: No multi-user support. One password, one session.
 5. **AI key**: Moonshot API key may expire. The AI service gracefully falls back to mock responses.
+6. **Co-Pilot requires Moonshot key**: The chat agent needs a valid `MOONSHOT_API_KEY`. Without it, the agent will fail to generate responses (no mock fallback like the AI service).
+7. **Co-Pilot has no persistent memory yet**: Session memory only (Phase 3 of PRD). Conversations don't carry over between sessions.
+8. **CopilotKit frontend volumes**: After adding CopilotKit packages, use `docker compose up --build -V -d frontend` to refresh the anonymous `node_modules` volume.

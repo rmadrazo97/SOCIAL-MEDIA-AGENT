@@ -146,6 +146,25 @@ class ApiClient {
     return this.fetch(`/api/posts/${postId}/remix`, { method: 'POST', body: JSON.stringify({ remix_type: remixType }) });
   }
 
+  // Artifacts
+  async getArtifacts(params?: { account_id?: string; artifact_type?: string; status?: string }) {
+    const q = new URLSearchParams();
+    if (params?.account_id) q.set('account_id', params.account_id);
+    if (params?.artifact_type) q.set('artifact_type', params.artifact_type);
+    if (params?.status) q.set('status', params.status);
+    return this.fetch(`/api/artifacts?${q}`);
+  }
+  async getArtifact(id: string) { return this.fetch(`/api/artifacts/${id}`); }
+  async createArtifact(data: { artifact_type: string; title: string; content: string; account_id?: string; metadata_json?: any }) {
+    return this.fetch('/api/artifacts', { method: 'POST', body: JSON.stringify(data) });
+  }
+  async updateArtifact(id: string, data: { title?: string; content?: string; status?: string }) {
+    return this.fetch(`/api/artifacts/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  }
+  async deleteArtifact(id: string) {
+    return this.fetch(`/api/artifacts/${id}`, { method: 'DELETE' });
+  }
+
   // CSV Import
   async importCsv(accountId: string, file: File) {
     const formData = new FormData();

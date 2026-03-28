@@ -177,3 +177,47 @@ class AccountMetricsSummary(BaseModel):
     post_count: int
     avg_engagement_rate: float
     top_post_id: UUID | None
+
+
+# Artifact
+class ArtifactCreate(BaseModel):
+    account_id: UUID | None = None
+    artifact_type: str
+    title: str
+    content: str
+    metadata_json: dict | None = None
+
+
+class ArtifactUpdate(BaseModel):
+    title: str | None = None
+    content: str | None = None
+    status: str | None = None
+    metadata_json: dict | None = None
+
+
+class ArtifactOut(BaseModel):
+    id: UUID
+    account_id: UUID | None
+    artifact_type: str
+    title: str
+    content: str
+    metadata_json: dict | None
+    status: str
+    created_at: datetime
+    updated_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+# Agent Conversation
+class AgentConversationOut(BaseModel):
+    id: UUID
+    thread_id: str
+    account_id: UUID | None
+    summary: str | None
+    created_at: datetime
+    last_active_at: datetime
+
+    class Config:
+        from_attributes = True

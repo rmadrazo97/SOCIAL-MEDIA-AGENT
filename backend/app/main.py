@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, accounts, posts, insights, recommendations, briefs, metrics, remix, csv_import, sync
+from app.api import auth, accounts, posts, insights, recommendations, briefs, metrics, remix, csv_import, sync, artifacts
+from app.api.agent import register_copilotkit
 from app.workers.scheduler import setup_scheduler
 
 logging.basicConfig(
@@ -41,6 +42,10 @@ app.include_router(metrics.router)
 app.include_router(remix.router)
 app.include_router(csv_import.router)
 app.include_router(sync.router)
+app.include_router(artifacts.router)
+
+# Register CopilotKit agent endpoint (adds routes at /copilotkit)
+register_copilotkit(app)
 
 
 @app.get("/health")

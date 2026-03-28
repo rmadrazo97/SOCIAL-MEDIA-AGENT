@@ -32,3 +32,8 @@ export function useRecommendations(accountId: string | null) {
 export function useBaseline(accountId: string | null) {
   return useSWR(accountId ? `baseline-${accountId}` : null, () => api.getBaseline(accountId!));
 }
+
+export function useArtifacts(params?: { account_id?: string; artifact_type?: string }) {
+  const key = params ? `artifacts-${params.account_id || 'all'}-${params.artifact_type || 'all'}` : 'artifacts';
+  return useSWR(key, () => api.getArtifacts(params));
+}

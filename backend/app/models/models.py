@@ -145,3 +145,55 @@ class AccountBaseline(Base):
     baseline_data: Mapped[dict] = mapped_column(JSONB)
 
     account: Mapped["Account"] = relationship(back_populates="baselines")
+
+
+class Artifact(Base):
+    __tablename__ = "artifacts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True)
+    artifact_type: Mapped[str] = mapped_column(String(30))  # content_idea, copy_draft, strategy, report, trend_analysis, task
+    title: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active, archived, completed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+    account: Mapped["Account | None"] = relationship(backref="artifacts")
+
+    __table_args__ = (
+        Index("ix_artifacts_account_type", "account_id", "artifact_type"),
+    )
+
+
+class AgentConversation(Base):
+    __tablename__ = "agent_conversations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    thread_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    account_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_active_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    account: Mapped["Account | None"] = relationship(backref="agent_conversations")
+
+
+class AgentMemoryEntry(Base):
+    __tablename__ = "agent_memory_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True)
+    memory_type: Mapped[str] = mapped_column(String(30))  # creator_profile, insight, preference, pattern
+    key: Mapped[str] = mapped_column(String(255), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Numeric(3, 2), default=1.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+    account: Mapped["Account | None"] = relationship(backref="agent_memory_entries")
+
+    __table_args__ = (
+        Index("ix_agent_memory_account_type", "account_id", "memory_type"),
+    )
