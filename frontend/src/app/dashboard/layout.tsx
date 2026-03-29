@@ -18,7 +18,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const runtimeUrl = '/copilotkit';
 
   return (
-    <CopilotKit runtimeUrl={runtimeUrl}>
+    <CopilotKit runtimeUrl={runtimeUrl} agent="social_media_copilot">
       <DashboardLayout>{children}</DashboardLayout>
       <CopilotPopup
         labels={{
