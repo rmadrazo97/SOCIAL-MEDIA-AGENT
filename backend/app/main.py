@@ -35,6 +35,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(accounts.router)
 app.include_router(posts.router)
+app.include_router(posts.media_router)
 app.include_router(insights.router)
 app.include_router(recommendations.router)
 app.include_router(briefs.router)

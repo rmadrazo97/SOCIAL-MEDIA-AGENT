@@ -13,6 +13,7 @@ from app.schemas.schemas import PostCreate, PostOut, PostMetricCreate, PostMetri
 from app.config import settings
 
 router = APIRouter(prefix="/api", tags=["posts"], dependencies=[Depends(verify_password)])
+media_router = APIRouter(prefix="/api", tags=["media"])
 
 
 @router.get("/accounts/{account_id}/posts", response_model=list[PostWithMetrics])
@@ -118,8 +119,8 @@ async def list_post_comments(
     return result.scalars().all()
 
 
-# Media
-@router.get("/posts/{post_id}/media/{filename}")
+# Media (public — no auth, served by <img>/<video> tags)
+@media_router.get("/posts/{post_id}/media/{filename}")
 async def get_post_media(post_id: UUID, filename: str, db: AsyncSession = Depends(get_db)):
     """Serve a stored media file for a post."""
     result = await db.execute(
@@ -145,7 +146,7 @@ async def get_post_media(post_id: UUID, filename: str, db: AsyncSession = Depend
     return FileResponse(media_path, media_type=content_type)
 
 
-@router.get("/posts/{post_id}/media")
+@media_router.get("/posts/{post_id}/media")
 async def list_post_media(post_id: UUID, db: AsyncSession = Depends(get_db)):
     """List available media files for a post."""
     result = await db.execute(

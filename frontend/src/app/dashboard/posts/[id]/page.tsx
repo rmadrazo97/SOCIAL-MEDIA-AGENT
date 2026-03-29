@@ -1,11 +1,12 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { usePost, usePostMetrics } from '@/lib/hooks';
+import { usePost, usePostMetrics, usePostComments } from '@/lib/hooks';
 import { api } from '@/lib/api';
 import {
   Eye, Heart, MessageCircle, Share2, Bookmark, ArrowLeft,
-  Sparkles, RefreshCw, Wand2, Instagram, Music2, ExternalLink
+  Sparkles, RefreshCw, Wand2, Instagram, Music2, ExternalLink,
+  ChevronLeft, ChevronRight, Play, Image as ImageIcon, ThumbsUp, Reply
 } from 'lucide-react';
 
 export default function PostDetailPage() {
@@ -13,10 +14,22 @@ export default function PostDetailPage() {
   const router = useRouter();
   const { data: post, isLoading } = usePost(id as string);
   const { data: metricHistory } = usePostMetrics(id as string);
+  const { data: comments } = usePostComments(id as string);
   const [diagnostic, setDiagnostic] = useState<any>(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [remixes, setRemixes] = useState<any[]>([]);
   const [remixLoading, setRemixLoading] = useState(false);
+  const [mediaFiles, setMediaFiles] = useState<{ filename: string; size_bytes: number; url: string }[]>([]);
+  const [activeMediaIdx, setActiveMediaIdx] = useState(0);
+  const [showAllComments, setShowAllComments] = useState(false);
+
+  useEffect(() => {
+    if (id) {
+      api.getPostMedia(id as string).then(res => {
+        if (res?.files?.length) setMediaFiles(res.files);
+      }).catch(() => {});
+    }
+  }, [id]);
 
   async function loadDiagnostic() {
     setDiagLoading(true);
@@ -57,6 +70,18 @@ export default function PostDetailPage() {
 
   const m = post.latest_metrics;
 
+  // Separate top-level comments and replies
+  const topComments = comments?.filter((c: any) => !c.parent_comment_id) || [];
+  const replies = comments?.filter((c: any) => c.parent_comment_id) || [];
+  const repliesByParent = replies.reduce((acc: Record<string, any[]>, r: any) => {
+    (acc[r.parent_comment_id] = acc[r.parent_comment_id] || []).push(r);
+    return acc;
+  }, {} as Record<string, any[]>);
+
+  // Sort by likes
+  const sortedComments = [...topComments].sort((a: any, b: any) => b.comment_like_count - a.comment_like_count);
+  const displayComments = showAllComments ? sortedComments : sortedComments.slice(0, 10);
+
   return (
     <div className="space-y-6">
       <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-dun hover:text-bone">
@@ -75,8 +100,74 @@ export default function PostDetailPage() {
             </a>
           )}
         </div>
-        <p className="text-bone">{post.caption || 'No caption'}</p>
+        <p className="text-bone whitespace-pre-line">{post.caption || 'No caption'}</p>
       </div>
+
+      {/* Media Gallery */}
+      {mediaFiles.length > 0 && (
+        <div className="bg-reseda/20 border border-reseda/30 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <ImageIcon className="w-4 h-4 text-dun" />
+            <h3 className="text-sm font-medium text-dun">
+              Media {mediaFiles.length > 1 && `(${activeMediaIdx + 1}/${mediaFiles.length})`}
+            </h3>
+          </div>
+          <div className="relative flex items-center justify-center bg-ebony/40 rounded-lg overflow-hidden" style={{ minHeight: 300 }}>
+            {mediaFiles[activeMediaIdx]?.filename.endsWith('.mp4') ? (
+              <video
+                key={mediaFiles[activeMediaIdx].url}
+                src={mediaFiles[activeMediaIdx].url}
+                controls
+                className="max-h-[500px] w-auto rounded"
+              />
+            ) : (
+              <img
+                key={mediaFiles[activeMediaIdx].url}
+                src={mediaFiles[activeMediaIdx].url}
+                alt={`Post media ${activeMediaIdx + 1}`}
+                className="max-h-[500px] w-auto object-contain rounded"
+              />
+            )}
+            {mediaFiles.length > 1 && (
+              <>
+                <button
+                  onClick={() => setActiveMediaIdx(i => (i - 1 + mediaFiles.length) % mediaFiles.length)}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 bg-ebony/70 hover:bg-ebony/90 text-bone p-1.5 rounded-full transition-colors"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => setActiveMediaIdx(i => (i + 1) % mediaFiles.length)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 bg-ebony/70 hover:bg-ebony/90 text-bone p-1.5 rounded-full transition-colors"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </>
+            )}
+          </div>
+          {mediaFiles.length > 1 && (
+            <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
+              {mediaFiles.map((file, i) => (
+                <button
+                  key={file.filename}
+                  onClick={() => setActiveMediaIdx(i)}
+                  className={`flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
+                    i === activeMediaIdx ? 'border-sage' : 'border-transparent opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  {file.filename.endsWith('.mp4') ? (
+                    <div className="w-full h-full bg-ebony/60 flex items-center justify-center">
+                      <Play className="w-5 h-5 text-bone" />
+                    </div>
+                  ) : (
+                    <img src={file.url} alt={`Thumb ${i + 1}`} className="w-full h-full object-cover" />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Metrics */}
       {m && (
@@ -97,6 +188,67 @@ export default function PostDetailPage() {
               <div className="text-xl font-bold text-bone">{typeof value === 'number' ? value.toLocaleString() : value}</div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Comments Section */}
+      {comments?.length > 0 && (
+        <div className="bg-reseda/20 border border-reseda/30 rounded-xl p-6">
+          <h3 className="text-lg font-bold flex items-center gap-2 mb-4 text-bone">
+            <MessageCircle className="w-5 h-5 text-sage" />
+            Comments
+            <span className="text-sm font-normal text-dun/60 ml-1">({comments.length})</span>
+          </h3>
+          <div className="space-y-3">
+            {displayComments.map((c: any) => (
+              <div key={c.id}>
+                <div className="p-3 bg-ebony/40 rounded-lg">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium text-sage">@{c.username}</span>
+                    <div className="flex items-center gap-3 text-xs text-dun/50">
+                      {c.comment_like_count > 0 && (
+                        <span className="flex items-center gap-1">
+                          <ThumbsUp className="w-3 h-3" /> {c.comment_like_count}
+                        </span>
+                      )}
+                      {c.reply_count > 0 && (
+                        <span className="flex items-center gap-1">
+                          <Reply className="w-3 h-3" /> {c.reply_count}
+                        </span>
+                      )}
+                      <span>{new Date(c.commented_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                  <p className="text-sm text-bone/90">{c.text}</p>
+                </div>
+                {/* Replies */}
+                {repliesByParent[c.id]?.map((r: any) => (
+                  <div key={r.id} className="ml-6 mt-2 p-3 bg-ebony/30 rounded-lg border-l-2 border-reseda/30">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-sage/80">@{r.username}</span>
+                      <div className="flex items-center gap-3 text-xs text-dun/40">
+                        {r.comment_like_count > 0 && (
+                          <span className="flex items-center gap-1">
+                            <ThumbsUp className="w-3 h-3" /> {r.comment_like_count}
+                          </span>
+                        )}
+                        <span>{new Date(r.commented_at).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                    <p className="text-sm text-bone/80">{r.text}</p>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+          {sortedComments.length > 10 && (
+            <button
+              onClick={() => setShowAllComments(!showAllComments)}
+              className="mt-4 text-sm text-sage hover:text-sage/80 transition-colors"
+            >
+              {showAllComments ? 'Show less' : `Show all ${sortedComments.length} comments`}
+            </button>
+          )}
         </div>
       )}
 
@@ -166,9 +318,33 @@ export default function PostDetailPage() {
                 ))}
               </div>
             )}
+            {diagnostic.metadata_json?.comment_analysis && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-dun">Comment Analysis</h4>
+                <div className="p-3 bg-ebony/40 rounded-lg space-y-2">
+                  {diagnostic.metadata_json.comment_analysis.sentiment && (
+                    <p className="text-sm text-bone">
+                      <span className="text-dun">Sentiment:</span> {diagnostic.metadata_json.comment_analysis.sentiment}
+                    </p>
+                  )}
+                  {diagnostic.metadata_json.comment_analysis.themes?.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {diagnostic.metadata_json.comment_analysis.themes.map((t: string, i: number) => (
+                        <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-sage/20 text-sage">{t}</span>
+                      ))}
+                    </div>
+                  )}
+                  {diagnostic.metadata_json.comment_analysis.engagement_quality && (
+                    <p className="text-sm text-bone">
+                      <span className="text-dun">Quality:</span> {diagnostic.metadata_json.comment_analysis.engagement_quality}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
-          <p className="text-dun/60 text-sm">Click Generate to get an AI analysis of this post.</p>
+          <p className="text-dun/60 text-sm">Click Generate to get an AI analysis of this post including comment sentiment.</p>
         )}
       </div>
 

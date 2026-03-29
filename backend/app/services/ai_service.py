@@ -57,7 +57,7 @@ class AIService:
             "recommendations": [],
         }
 
-    async def generate_diagnostic(self, post, metrics, baseline) -> dict:
+    async def generate_diagnostic(self, post, metrics, baseline, comments=None) -> dict:
         baseline_data = baseline.baseline_data if baseline else {}
         metrics_dict = {
             "views": metrics.views if metrics else 0,
@@ -69,14 +69,36 @@ class AIService:
         }
 
         system_prompt = """You are a social media analytics expert. Analyze post performance relative to the creator's baseline.
+Also analyze the comment section sentiment and engagement quality if comments are provided.
 Return JSON with these exact keys: summary (string), performance_label (one of: viral, above_average, average, below_average, underperforming),
-key_factors (array of objects with keys: factor, impact, explanation), what_to_repeat (array of strings), what_to_improve (array of strings)."""
+key_factors (array of objects with keys: factor, impact, explanation), what_to_repeat (array of strings), what_to_improve (array of strings),
+comment_analysis (object with keys: sentiment, themes (array of strings), engagement_quality, notable_comments (array of strings)) — include comment_analysis only if comments data is provided."""
 
         user_prompt = f"""Post: {post.caption or 'No caption'}
 Type: {post.post_type}, Platform: {post.platform}
 Posted: {post.posted_at}
 Metrics: {json.dumps(metrics_dict)}
 Baseline: {json.dumps(baseline_data)}"""
+
+        if comments:
+            comments_text = "\n".join(
+                f"@{c['username']}: {c['text']} (likes: {c['likes']})"
+                for c in comments[:25]
+            )
+            user_prompt += f"\n\nTop Comments ({len(comments)} total):\n{comments_text}"
+
+        return await self._call_llm(system_prompt, user_prompt)
+
+    async def describe_post_media(self, post_caption: str, media_descriptions: list[str]) -> dict:
+        """Describe post content for text-only copilot analysis."""
+        system_prompt = """You are a social media visual content analyst. Analyze the described post content.
+Return JSON with keys: visual_summary (string), content_themes (array of strings), visual_style (string),
+audience_appeal (string), improvement_suggestions (array of strings)."""
+
+        user_prompt = f"""Post caption: {post_caption or 'No caption'}
+Media files: {json.dumps(media_descriptions)}
+
+Analyze this post's visual and textual content for social media optimization."""
 
         return await self._call_llm(system_prompt, user_prompt)
 

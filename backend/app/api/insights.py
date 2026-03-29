@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.api.deps import verify_password
-from app.models.models import Insight, Post, PostMetric, AccountBaseline
+from app.models.models import Insight, Post, PostMetric, PostComment, AccountBaseline
 from app.schemas.schemas import InsightOut
 from app.services.ai_service import ai_service
 
@@ -44,7 +44,20 @@ async def generate_post_diagnostic(post_id: UUID, db: AsyncSession = Depends(get
     )
     baseline = result.scalar_one_or_none()
 
-    diagnostic_content = await ai_service.generate_diagnostic(post, metrics, baseline)
+    # Fetch top comments for analysis
+    comments_result = await db.execute(
+        select(PostComment)
+        .where(PostComment.post_id == post_id)
+        .order_by(desc(PostComment.comment_like_count))
+        .limit(25)
+    )
+    comment_rows = comments_result.scalars().all()
+    comments_data = [
+        {"username": c.username, "text": c.text, "likes": c.comment_like_count}
+        for c in comment_rows
+    ] if comment_rows else None
+
+    diagnostic_content = await ai_service.generate_diagnostic(post, metrics, baseline, comments=comments_data)
 
     insight = Insight(
         post_id=post_id,

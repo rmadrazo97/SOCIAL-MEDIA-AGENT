@@ -5,9 +5,12 @@ from datetime import datetime, timedelta, timezone
 from langchain_core.tools import tool
 from sqlalchemy import select, func, desc
 
+from pathlib import Path
+
 from app.database import async_session
+from app.config import settings
 from app.models.models import (
-    Account, Post, PostMetric, AccountBaseline, DailyBrief,
+    Account, Post, PostMetric, PostComment, AccountBaseline, DailyBrief,
     Recommendation, Insight, Artifact,
 )
 
@@ -289,13 +292,99 @@ async def list_artifacts(account_id: str = None, artifact_type: str = None) -> s
         ])
 
 
+@tool
+async def get_post_comments(post_id: str, limit: int = 20) -> str:
+    """Get comments on a post, sorted by most liked. Useful for understanding audience sentiment and engagement quality.
+
+    Args:
+        post_id: UUID of the post
+        limit: Max comments to return (default 20)
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(PostComment)
+            .where(PostComment.post_id == post_id)
+            .order_by(desc(PostComment.comment_like_count))
+            .limit(limit)
+        )
+        comments = result.scalars().all()
+        return json.dumps([
+            {
+                "username": c.username,
+                "text": c.text,
+                "likes": c.comment_like_count,
+                "replies": c.reply_count,
+                "date": c.commented_at.isoformat(),
+            }
+            for c in comments
+        ], default=_serialize_datetime)
+
+
+@tool
+async def analyze_post_media(post_id: str) -> str:
+    """Analyze the visual content of a post's media files. Returns descriptions of images and videos
+    stored for the post, including file types, sizes, and count. Use this to understand what a post
+    looks like when providing content feedback.
+
+    Args:
+        post_id: UUID of the post
+    """
+    async with async_session() as session:
+        from sqlalchemy.orm import selectinload
+        result = await session.execute(
+            select(Post).where(Post.id == post_id).options(selectinload(Post.account))
+        )
+        post = result.scalar_one_or_none()
+        if not post:
+            return json.dumps({"error": "Post not found"})
+
+        media_dir = Path(settings.INSTAGRAM_MEDIA_DIR) / post.account.username / (post.platform_post_id or "")
+        if not media_dir.exists():
+            return json.dumps({
+                "post_id": post_id,
+                "caption": post.caption,
+                "post_type": post.post_type,
+                "media_files": [],
+                "note": "No stored media files found. Use the post caption and metrics for analysis."
+            })
+
+        media_files = []
+        for f in sorted(media_dir.iterdir()):
+            if f.is_file():
+                file_info = {
+                    "filename": f.name,
+                    "type": "video" if f.suffix == ".mp4" else "image",
+                    "size_kb": round(f.stat().st_size / 1024),
+                    "url": f"/api/posts/{post_id}/media/{f.name}",
+                }
+                media_files.append(file_info)
+
+        return json.dumps({
+            "post_id": post_id,
+            "caption": post.caption,
+            "post_type": post.post_type,
+            "platform": post.platform,
+            "posted_at": post.posted_at.isoformat(),
+            "permalink": post.permalink,
+            "media_count": len(media_files),
+            "media_files": media_files,
+            "analysis_context": (
+                f"This is a {post.post_type} post with {len(media_files)} media file(s). "
+                f"{'It contains video content.' if any(m['type'] == 'video' for m in media_files) else 'It contains image content only.'} "
+                f"To provide visual feedback, consider the post type, caption themes, and media composition."
+            ),
+        }, default=_serialize_datetime)
+
+
 query_tools = [
     get_accounts,
     get_account_metrics,
     get_account_baseline,
     get_posts,
     get_post_detail,
+    get_post_comments,
     get_daily_brief,
     get_recommendations,
     list_artifacts,
+    analyze_post_media,
 ]

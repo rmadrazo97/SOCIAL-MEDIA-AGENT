@@ -1,12 +1,87 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useAccounts, usePosts } from '@/lib/hooks';
-import { Eye, Heart, MessageCircle, Share2, Instagram, Music2 } from 'lucide-react';
+import { api } from '@/lib/api';
+import { Eye, Heart, MessageCircle, Play, Image as ImageIcon, Layers, Film } from 'lucide-react';
 import Link from 'next/link';
+
+function PostCard({ post }: { post: any }) {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const m = post.latest_metrics;
+
+  useEffect(() => {
+    api.getPostMedia(post.id).then(res => {
+      const img = res?.files?.find((f: any) => !f.filename.endsWith('.mp4'));
+      if (img) setThumbUrl(img.url);
+      else if (res?.files?.length) setThumbUrl(res.files[0].url);
+    }).catch(() => {});
+  }, [post.id]);
+
+  const TypeIcon = post.post_type === 'reel' || post.post_type === 'video'
+    ? Film
+    : post.post_type === 'carousel'
+    ? Layers
+    : ImageIcon;
+
+  return (
+    <Link href={`/dashboard/posts/${post.id}`} className="relative aspect-square overflow-hidden bg-ebony/40 group rounded-lg">
+      {thumbUrl ? (
+        <img src={thumbUrl} alt="" className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <TypeIcon className="w-8 h-8 text-dun/30" />
+        </div>
+      )}
+
+      {/* Type badge */}
+      <div className="absolute top-2 right-2">
+        <TypeIcon className="w-4 h-4 text-white drop-shadow-lg" />
+      </div>
+
+      {/* Hover overlay with metrics */}
+      <div className="absolute inset-0 bg-ebony/75 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
+        <div className="flex items-center gap-5 text-bone text-sm font-medium">
+          {m?.likes != null && (
+            <span className="flex items-center gap-1.5">
+              <Heart className="w-4 h-4 fill-current" />
+              {formatNum(m.likes)}
+            </span>
+          )}
+          {m?.views != null && m.views > 0 && (
+            <span className="flex items-center gap-1.5">
+              <Eye className="w-4 h-4" />
+              {formatNum(m.views)}
+            </span>
+          )}
+          {m?.comments != null && (
+            <span className="flex items-center gap-1.5">
+              <MessageCircle className="w-4 h-4" />
+              {formatNum(m.comments)}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Video play indicator */}
+      {(post.post_type === 'reel' || post.post_type === 'video') && (
+        <div className="absolute bottom-2 left-2">
+          <Play className="w-4 h-4 text-white fill-white drop-shadow-lg" />
+        </div>
+      )}
+    </Link>
+  );
+}
+
+function formatNum(n: number): string {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return n.toLocaleString();
+}
 
 export default function PostsPage() {
   const { data: accounts } = useAccounts();
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+  const [filterType, setFilterType] = useState<string>('all');
 
   useEffect(() => {
     if (accounts?.length && !selectedAccount) {
@@ -16,83 +91,74 @@ export default function PostsPage() {
 
   const { data: posts, isLoading } = usePosts(selectedAccount);
 
+  const filteredPosts = posts?.filter((p: any) =>
+    filterType === 'all' || p.post_type === filterType
+  );
+
+  const typeCounts = posts?.reduce((acc: Record<string, number>, p: any) => {
+    acc[p.post_type] = (acc[p.post_type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>) || {};
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-bone">Posts</h1>
-        {accounts?.length > 1 && (
-          <select
-            value={selectedAccount || ''}
-            onChange={(e) => setSelectedAccount(e.target.value)}
-            className="bg-reseda/20 border border-reseda/30 rounded-lg px-3 py-2 text-sm text-bone"
-          >
-            {accounts.map((acc: any) => (
-              <option key={acc.id} value={acc.id}>@{acc.username} ({acc.platform})</option>
-            ))}
-          </select>
-        )}
+        <div className="flex items-center gap-3">
+          {accounts?.length > 1 && (
+            <select
+              value={selectedAccount || ''}
+              onChange={(e) => setSelectedAccount(e.target.value)}
+              className="bg-reseda/20 border border-reseda/30 rounded-lg px-3 py-2 text-sm text-bone"
+            >
+              {accounts.map((acc: any) => (
+                <option key={acc.id} value={acc.id}>@{acc.username} ({acc.platform})</option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-3">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-20 bg-reseda/20 rounded-xl animate-pulse" />
+      {/* Type filters */}
+      {posts?.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setFilterType('all')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              filterType === 'all' ? 'bg-sage/30 text-bone' : 'bg-reseda/20 text-dun hover:text-bone'
+            }`}
+          >
+            All ({posts.length})
+          </button>
+          {Object.entries(typeCounts).map(([type, count]) => (
+            <button
+              key={type}
+              onClick={() => setFilterType(type)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                filterType === type ? 'bg-sage/30 text-bone' : 'bg-reseda/20 text-dun hover:text-bone'
+              }`}
+            >
+              {type} ({count as number})
+            </button>
           ))}
         </div>
-      ) : !posts?.length ? (
+      )}
+
+      {isLoading ? (
+        <div className="grid grid-cols-3 gap-1 md:gap-2">
+          {[...Array(9)].map((_, i) => (
+            <div key={i} className="aspect-square bg-reseda/20 rounded-lg animate-pulse" />
+          ))}
+        </div>
+      ) : !filteredPosts?.length ? (
         <div className="text-center py-20 text-dun/60">
           <p>No posts found. Import data via CSV or connect a platform.</p>
         </div>
       ) : (
-        <div className="bg-reseda/20 border border-reseda/30 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-reseda/30 text-dun text-left">
-                <th className="px-4 py-3 font-medium">Post</th>
-                <th className="px-4 py-3 font-medium">Type</th>
-                <th className="px-4 py-3 font-medium">Date</th>
-                <th className="px-4 py-3 font-medium text-right">Views</th>
-                <th className="px-4 py-3 font-medium text-right">Likes</th>
-                <th className="px-4 py-3 font-medium text-right">Comments</th>
-                <th className="px-4 py-3 font-medium text-right">Shares</th>
-                <th className="px-4 py-3 font-medium text-right">Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {posts.map((post: any) => {
-                const m = post.latest_metrics;
-                const score = m?.performance_score;
-                let scoreColor = 'text-dun/50';
-                if (score >= 90) scoreColor = 'text-purple-400';
-                else if (score >= 75) scoreColor = 'text-green-400';
-                else if (score >= 50) scoreColor = 'text-yellow-400';
-                else if (score >= 25) scoreColor = 'text-orange-400';
-                else if (score !== null && score !== undefined) scoreColor = 'text-red-400';
-
-                return (
-                  <tr key={post.id} className="border-b border-reseda/20 hover:bg-ebony/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <Link href={`/dashboard/posts/${post.id}`} className="hover:text-sage transition-colors">
-                        <div className="flex items-center gap-2">
-                          {post.platform === 'instagram' ? <Instagram className="w-3 h-3 text-pink-400" /> : <Music2 className="w-3 h-3 text-cyan-400" />}
-                          <span className="truncate max-w-xs text-bone">{post.caption || 'No caption'}</span>
-                        </div>
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-dun">{post.post_type}</td>
-                    <td className="px-4 py-3 text-dun">{new Date(post.posted_at).toLocaleDateString()}</td>
-                    <td className="px-4 py-3 text-right text-bone">{m?.views?.toLocaleString() || '-'}</td>
-                    <td className="px-4 py-3 text-right text-bone">{m?.likes?.toLocaleString() || '-'}</td>
-                    <td className="px-4 py-3 text-right text-bone">{m?.comments?.toLocaleString() || '-'}</td>
-                    <td className="px-4 py-3 text-right text-bone">{m?.shares?.toLocaleString() || '-'}</td>
-                    <td className={`px-4 py-3 text-right font-medium ${scoreColor}`}>
-                      {score !== null && score !== undefined ? score : '-'}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="grid grid-cols-3 gap-1 md:gap-2">
+          {filteredPosts.map((post: any) => (
+            <PostCard key={post.id} post={post} />
+          ))}
         </div>
       )}
     </div>

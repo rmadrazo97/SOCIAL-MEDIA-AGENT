@@ -8,7 +8,7 @@ from sqlalchemy import select, desc
 
 from app.database import async_session
 from app.models.models import (
-    Account, Post, PostMetric, AccountBaseline, Recommendation, Artifact,
+    Account, Post, PostMetric, PostComment, AccountBaseline, Recommendation, Artifact,
 )
 from app.services.ai_service import ai_service
 
@@ -57,7 +57,19 @@ async def generate_post_diagnostic(post_id: str) -> str:
             .limit(1)
         )).scalar_one_or_none()
 
-        result = await ai_service.generate_diagnostic(post, metric, baseline)
+        # Fetch top comments for analysis
+        comment_rows = (await session.execute(
+            select(PostComment)
+            .where(PostComment.post_id == post_id)
+            .order_by(desc(PostComment.comment_like_count))
+            .limit(25)
+        )).scalars().all()
+        comments_data = [
+            {"username": c.username, "text": c.text, "likes": c.comment_like_count}
+            for c in comment_rows
+        ] if comment_rows else None
+
+        result = await ai_service.generate_diagnostic(post, metric, baseline, comments=comments_data)
         return json.dumps(result)
 
 
