@@ -6,8 +6,149 @@ import { api } from '@/lib/api';
 import {
   Eye, Heart, MessageCircle, Share2, Bookmark, ArrowLeft,
   Sparkles, RefreshCw, Wand2, Instagram, Music2, ExternalLink,
-  ChevronLeft, ChevronRight, Play, Image as ImageIcon, ThumbsUp, Reply
+  ChevronLeft, ChevronRight, Play, Image as ImageIcon, ThumbsUp, Reply,
+  Users, Target, TrendingUp, UserPlus, BarChart3
 } from 'lucide-react';
+
+function InsightsSection({ insight }: { insight: any }) {
+  const nonFollowerPct = insight.reach_non_follower_pct ?? 0;
+  const followerPct = insight.reach_follower_pct ?? 100;
+  const discoveryLevel = nonFollowerPct >= 30 ? 'high' : nonFollowerPct >= 15 ? 'medium' : 'low';
+  const discoveryColor = discoveryLevel === 'high' ? 'text-green-400' : discoveryLevel === 'medium' ? 'text-yellow-400' : 'text-red-400';
+
+  // Find top impression source
+  const sources = [
+    { name: 'Home', value: insight.from_home },
+    { name: 'Profile', value: insight.from_profile },
+    { name: 'Hashtags', value: insight.from_hashtags },
+    { name: 'Explore', value: insight.from_explore },
+    { name: 'Other', value: insight.from_other },
+  ];
+  const totalSources = sources.reduce((s, x) => s + x.value, 0);
+
+  return (
+    <div className="bg-reseda/20 border border-reseda/30 rounded-xl p-6">
+      <h3 className="text-lg font-bold flex items-center gap-2 mb-4 text-bone">
+        <BarChart3 className="w-5 h-5 text-sage" />
+        Instagram Insights
+      </h3>
+
+      {/* Top cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div className="bg-ebony/40 rounded-lg p-3">
+          <div className="flex items-center gap-1.5 text-dun text-xs mb-1">
+            <Users className="w-3 h-3" /> Accounts Reached
+          </div>
+          <div className="text-xl font-bold text-bone">{insight.accounts_reached.toLocaleString()}</div>
+        </div>
+        <div className="bg-ebony/40 rounded-lg p-3">
+          <div className="flex items-center gap-1.5 text-dun text-xs mb-1">
+            <Eye className="w-3 h-3" /> Impressions
+          </div>
+          <div className="text-xl font-bold text-bone">{insight.impressions.toLocaleString()}</div>
+        </div>
+        <div className="bg-ebony/40 rounded-lg p-3">
+          <div className="flex items-center gap-1.5 text-dun text-xs mb-1">
+            <Target className="w-3 h-3" /> Interactions
+          </div>
+          <div className="text-xl font-bold text-bone">{insight.total_interactions.toLocaleString()}</div>
+        </div>
+        <div className="bg-ebony/40 rounded-lg p-3">
+          <div className="flex items-center gap-1.5 text-dun text-xs mb-1">
+            <TrendingUp className="w-3 h-3" /> Discovery
+          </div>
+          <div className={`text-xl font-bold ${discoveryColor}`}>
+            {nonFollowerPct.toFixed(1)}%
+          </div>
+          <div className="text-xs text-dun/60">non-followers</div>
+        </div>
+      </div>
+
+      {/* Reach breakdown */}
+      {(insight.reach_follower_pct != null || insight.reach_non_follower_pct != null) && (
+        <div className="mb-5">
+          <h4 className="text-sm font-medium text-dun mb-2">Reach — Follower vs Non-Follower</h4>
+          <div className="flex h-6 rounded-full overflow-hidden bg-ebony/40">
+            <div
+              className="bg-sage/70 flex items-center justify-center text-xs text-bone font-medium"
+              style={{ width: `${followerPct}%` }}
+            >
+              {followerPct > 10 && `${followerPct.toFixed(0)}% followers`}
+            </div>
+            <div
+              className="bg-pink-500/60 flex items-center justify-center text-xs text-bone font-medium"
+              style={{ width: `${nonFollowerPct}%` }}
+            >
+              {nonFollowerPct > 10 && `${nonFollowerPct.toFixed(0)}% new`}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Impression source breakdown */}
+      {totalSources > 0 && (
+        <div className="mb-5">
+          <h4 className="text-sm font-medium text-dun mb-2">Impression Sources</h4>
+          <div className="space-y-2">
+            {sources.filter(s => s.value > 0).sort((a, b) => b.value - a.value).map(s => {
+              const pct = (s.value / totalSources) * 100;
+              return (
+                <div key={s.name} className="flex items-center gap-3">
+                  <span className="text-xs text-dun w-16">{s.name}</span>
+                  <div className="flex-1 h-4 bg-ebony/40 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${
+                        s.name === 'Explore' ? 'bg-purple-500/70' :
+                        s.name === 'Hashtags' ? 'bg-blue-500/70' :
+                        s.name === 'Home' ? 'bg-sage/70' :
+                        s.name === 'Profile' ? 'bg-dun/50' :
+                        'bg-reseda/50'
+                      }`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-bone w-16 text-right">
+                    {s.value.toLocaleString()} ({pct.toFixed(0)}%)
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Profile activity */}
+      {(insight.profile_visits > 0 || insight.follows > 0) && (
+        <div className="flex gap-4">
+          {insight.profile_visits > 0 && (
+            <div className="flex items-center gap-2 text-sm text-dun">
+              <Users className="w-4 h-4 text-sage" />
+              <span className="text-bone font-medium">{insight.profile_visits}</span> profile visits
+            </div>
+          )}
+          {insight.follows > 0 && (
+            <div className="flex items-center gap-2 text-sm text-dun">
+              <UserPlus className="w-4 h-4 text-green-400" />
+              <span className="text-bone font-medium">{insight.follows}</span> follows
+            </div>
+          )}
+          {insight.saves > 0 && (
+            <div className="flex items-center gap-2 text-sm text-dun">
+              <Bookmark className="w-4 h-4 text-yellow-400" />
+              <span className="text-bone font-medium">{insight.saves}</span> saves
+            </div>
+          )}
+          {insight.shares > 0 && (
+            <div className="flex items-center gap-2 text-sm text-dun">
+              <Share2 className="w-4 h-4 text-blue-400" />
+              <span className="text-bone font-medium">{insight.shares}</span> shares
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function PostDetailPage() {
   const { id } = useParams();
@@ -69,6 +210,7 @@ export default function PostDetailPage() {
   }
 
   const m = post.latest_metrics;
+  const insight = post.latest_insight;
 
   // Separate top-level comments and replies
   const topComments = comments?.filter((c: any) => !c.parent_comment_id) || [];
@@ -190,6 +332,9 @@ export default function PostDetailPage() {
           ))}
         </div>
       )}
+
+      {/* Instagram Insights */}
+      {post.latest_insight && <InsightsSection insight={post.latest_insight} />}
 
       {/* Comments Section */}
       {comments?.length > 0 && (
@@ -316,6 +461,33 @@ export default function PostDetailPage() {
                     <p className="text-sm text-dun">{f.explanation}</p>
                   </div>
                 ))}
+              </div>
+            )}
+            {diagnostic.metadata_json?.discovery_analysis && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-dun">Discovery Analysis</h4>
+                <div className="p-3 bg-ebony/40 rounded-lg space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-dun text-sm">Discovery Score:</span>
+                    <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${
+                      diagnostic.metadata_json.discovery_analysis.discovery_score === 'high'
+                        ? 'bg-green-900/40 text-green-300'
+                        : diagnostic.metadata_json.discovery_analysis.discovery_score === 'medium'
+                        ? 'bg-yellow-900/40 text-yellow-300'
+                        : 'bg-red-900/40 text-red-300'
+                    }`}>
+                      {diagnostic.metadata_json.discovery_analysis.discovery_score}
+                    </span>
+                  </div>
+                  {diagnostic.metadata_json.discovery_analysis.top_source && (
+                    <p className="text-sm text-bone">
+                      <span className="text-dun">Top Source:</span> {diagnostic.metadata_json.discovery_analysis.top_source}
+                    </p>
+                  )}
+                  {diagnostic.metadata_json.discovery_analysis.recommendation && (
+                    <p className="text-sm text-sage">{diagnostic.metadata_json.discovery_analysis.recommendation}</p>
+                  )}
+                </div>
               </div>
             )}
             {diagnostic.metadata_json?.comment_analysis && (

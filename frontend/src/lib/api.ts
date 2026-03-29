@@ -173,6 +173,9 @@ class ApiClient {
     return this.fetch(`/api/accounts/${accountId}/growth?days=${days}`);
   }
 
+  // Post Insights (creator analytics)
+  async getPostInsights(postId: string) { return this.fetch(`/api/posts/${postId}/insights`); }
+
   // Comments
   async getPostComments(postId: string, limit = 50) {
     return this.fetch(`/api/posts/${postId}/comments?limit=${limit}`);

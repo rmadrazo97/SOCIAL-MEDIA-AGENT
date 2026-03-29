@@ -62,6 +62,7 @@ class Post(Base):
     metrics: Mapped[list["PostMetric"]] = relationship(back_populates="post", cascade="all, delete-orphan")
     insights: Mapped[list["Insight"]] = relationship(back_populates="post", cascade="all, delete-orphan")
     comments: Mapped[list["PostComment"]] = relationship(back_populates="post", cascade="all, delete-orphan")
+    post_insights: Mapped[list["PostInsight"]] = relationship(back_populates="post", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("account_id", "platform_post_id", name="uq_post_account_platform_id"),
@@ -207,6 +208,44 @@ class AgentMemoryEntry(Base):
 
     __table_args__ = (
         Index("ix_agent_memory_account_type", "account_id", "memory_type"),
+    )
+
+
+class PostInsight(Base):
+    """Creator-only Instagram insights data — reach, impressions, source breakdown, etc."""
+    __tablename__ = "post_insights"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    post_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("posts.id", ondelete="CASCADE"))
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Reach
+    accounts_reached: Mapped[int] = mapped_column(Integer, default=0)
+    reach_follower_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    reach_non_follower_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+
+    # Impressions / Views
+    impressions: Mapped[int] = mapped_column(Integer, default=0)
+    from_home: Mapped[int] = mapped_column(Integer, default=0)
+    from_profile: Mapped[int] = mapped_column(Integer, default=0)
+    from_hashtags: Mapped[int] = mapped_column(Integer, default=0)
+    from_explore: Mapped[int] = mapped_column(Integer, default=0)
+    from_other: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Interactions
+    total_interactions: Mapped[int] = mapped_column(Integer, default=0)
+    interaction_follower_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    saves: Mapped[int] = mapped_column(Integer, default=0)
+    shares: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Profile activity driven by this post
+    profile_visits: Mapped[int] = mapped_column(Integer, default=0)
+    follows: Mapped[int] = mapped_column(Integer, default=0)
+
+    post: Mapped["Post"] = relationship(back_populates="post_insights")
+
+    __table_args__ = (
+        Index("ix_post_insights_post_snapshot", "post_id", "snapshot_at"),
     )
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 from app.database import async_session
 from app.config import settings
 from app.models.models import (
-    Account, Post, PostMetric, PostComment, AccountBaseline, DailyBrief,
+    Account, Post, PostMetric, PostComment, PostInsight, AccountBaseline, DailyBrief,
     Recommendation, Insight, Artifact,
 )
 
@@ -183,7 +183,15 @@ async def get_post_detail(post_id: str) -> str:
             .order_by(desc(PostMetric.snapshot_at))
         )).scalars().all()
 
-        return json.dumps({
+        # Get latest insight
+        insight = (await session.execute(
+            select(PostInsight)
+            .where(PostInsight.post_id == post_id)
+            .order_by(desc(PostInsight.snapshot_at))
+            .limit(1)
+        )).scalar_one_or_none()
+
+        result_data = {
             "id": str(post.id),
             "platform": post.platform,
             "post_type": post.post_type,
@@ -203,7 +211,22 @@ async def get_post_detail(post_id: str) -> str:
                 }
                 for m in metrics
             ],
-        })
+        }
+
+        if insight:
+            result_data["insights"] = {
+                "accounts_reached": insight.accounts_reached,
+                "reach_non_follower_pct": float(insight.reach_non_follower_pct) if insight.reach_non_follower_pct else None,
+                "impressions": insight.impressions,
+                "from_explore": insight.from_explore,
+                "from_hashtags": insight.from_hashtags,
+                "saves": insight.saves,
+                "shares": insight.shares,
+                "profile_visits": insight.profile_visits,
+                "follows": insight.follows,
+            }
+
+        return json.dumps(result_data)
 
 
 @tool
@@ -293,6 +316,48 @@ async def list_artifacts(account_id: str = None, artifact_type: str = None) -> s
 
 
 @tool
+async def get_post_insights(post_id: str) -> str:
+    """Get Instagram creator-only insights for a post: reach, impressions, source breakdown,
+    follower vs non-follower ratios, profile visits, and follows driven by the post.
+    This is the most valuable data for understanding content discovery and growth potential.
+
+    Args:
+        post_id: UUID of the post
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(PostInsight)
+            .where(PostInsight.post_id == post_id)
+            .order_by(desc(PostInsight.snapshot_at))
+            .limit(1)
+        )
+        insight = result.scalar_one_or_none()
+        if not insight:
+            return json.dumps({"message": "No insights data available for this post. Insights are only available for posts owned by the logged-in Instagram account."})
+
+        return json.dumps({
+            "accounts_reached": insight.accounts_reached,
+            "reach_follower_pct": float(insight.reach_follower_pct) if insight.reach_follower_pct else None,
+            "reach_non_follower_pct": float(insight.reach_non_follower_pct) if insight.reach_non_follower_pct else None,
+            "impressions": insight.impressions,
+            "impression_sources": {
+                "home": insight.from_home,
+                "profile": insight.from_profile,
+                "hashtags": insight.from_hashtags,
+                "explore": insight.from_explore,
+                "other": insight.from_other,
+            },
+            "total_interactions": insight.total_interactions,
+            "interaction_follower_pct": float(insight.interaction_follower_pct) if insight.interaction_follower_pct else None,
+            "saves": insight.saves,
+            "shares": insight.shares,
+            "profile_visits": insight.profile_visits,
+            "follows_from_post": insight.follows,
+            "snapshot_at": insight.snapshot_at.isoformat(),
+        }, default=_serialize_datetime)
+
+
+@tool
 async def get_post_comments(post_id: str, limit: int = 20) -> str:
     """Get comments on a post, sorted by most liked. Useful for understanding audience sentiment and engagement quality.
 
@@ -322,13 +387,16 @@ async def get_post_comments(post_id: str, limit: int = 20) -> str:
 
 @tool
 async def analyze_post_media(post_id: str) -> str:
-    """Analyze the visual content of a post's media files. Returns descriptions of images and videos
-    stored for the post, including file types, sizes, and count. Use this to understand what a post
+    """Analyze the visual content of a post's media files. Reads the actual images and
+    encodes them so the LLM can see and describe them. Use this to understand what a post
     looks like when providing content feedback.
 
     Args:
         post_id: UUID of the post
     """
+    import base64
+    import mimetypes
+
     async with async_session() as session:
         from sqlalchemy.orm import selectinload
         result = await session.execute(
@@ -349,17 +417,38 @@ async def analyze_post_media(post_id: str) -> str:
             })
 
         media_files = []
-        for f in sorted(media_dir.iterdir()):
-            if f.is_file():
-                file_info = {
-                    "filename": f.name,
-                    "type": "video" if f.suffix == ".mp4" else "image",
-                    "size_kb": round(f.stat().st_size / 1024),
-                    "url": f"/api/posts/{post_id}/media/{f.name}",
-                }
-                media_files.append(file_info)
+        images_base64 = []
+        MAX_IMAGES = 5  # Limit to avoid token overflow
+        IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
-        return json.dumps({
+        for f in sorted(media_dir.iterdir()):
+            if not f.is_file():
+                continue
+            file_info = {
+                "filename": f.name,
+                "type": "video" if f.suffix.lower() == ".mp4" else "image",
+                "size_kb": round(f.stat().st_size / 1024),
+            }
+            media_files.append(file_info)
+
+            # Encode images as base64 for vision analysis
+            if f.suffix.lower() in IMAGE_EXTENSIONS and len(images_base64) < MAX_IMAGES:
+                try:
+                    raw = f.read_bytes()
+                    # Skip very large files (>2MB)
+                    if len(raw) > 2 * 1024 * 1024:
+                        file_info["note"] = "Image too large for vision analysis"
+                        continue
+                    mime = mimetypes.guess_type(f.name)[0] or "image/jpeg"
+                    b64 = base64.b64encode(raw).decode()
+                    images_base64.append({
+                        "filename": f.name,
+                        "data_url": f"data:{mime};base64,{b64}",
+                    })
+                except Exception:
+                    pass
+
+        result_data = {
             "post_id": post_id,
             "caption": post.caption,
             "post_type": post.post_type,
@@ -368,12 +457,14 @@ async def analyze_post_media(post_id: str) -> str:
             "permalink": post.permalink,
             "media_count": len(media_files),
             "media_files": media_files,
+            "images_base64": images_base64,
             "analysis_context": (
                 f"This is a {post.post_type} post with {len(media_files)} media file(s). "
-                f"{'It contains video content.' if any(m['type'] == 'video' for m in media_files) else 'It contains image content only.'} "
-                f"To provide visual feedback, consider the post type, caption themes, and media composition."
+                f"{len(images_base64)} image(s) are included as base64 for visual analysis. "
+                f"{'It also contains video content.' if any(m['type'] == 'video' for m in media_files) else ''}"
             ),
-        }, default=_serialize_datetime)
+        }
+        return json.dumps(result_data, default=_serialize_datetime)
 
 
 query_tools = [
@@ -382,6 +473,7 @@ query_tools = [
     get_account_baseline,
     get_posts,
     get_post_detail,
+    get_post_insights,
     get_post_comments,
     get_daily_brief,
     get_recommendations,

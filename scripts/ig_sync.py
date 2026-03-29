@@ -350,6 +350,118 @@ def fetch_post_detail(client, media_pk):
     return None
 
 
+def fetch_post_insights(client, media_pk):
+    """Fetch creator-only insights for a post (reach, impressions, sources, etc.)."""
+    try:
+        r = client.get(
+            f"https://www.instagram.com/api/v1/insights/media_organic_insights/{media_pk}/",
+            params={"ig_filters": "{}"},
+            headers=get_headers(),
+            cookies=get_cookies(),
+        )
+        if r.status_code != 200:
+            return None
+
+        data = r.json()
+        return parse_insights_response(data)
+    except Exception as e:
+        logger.debug(f"Insights not available for {media_pk}: {e}")
+        return None
+
+
+def parse_insights_response(data):
+    """Parse insights API response into a flat dict."""
+    result = {
+        "accounts_reached": 0,
+        "reach_follower_pct": None,
+        "reach_non_follower_pct": None,
+        "impressions": 0,
+        "from_home": 0,
+        "from_profile": 0,
+        "from_hashtags": 0,
+        "from_explore": 0,
+        "from_other": 0,
+        "total_interactions": 0,
+        "interaction_follower_pct": None,
+        "saves": 0,
+        "shares": 0,
+        "profile_visits": 0,
+        "follows": 0,
+    }
+
+    metrics = data.get("media_organic_insights", data)
+    if not isinstance(metrics, dict):
+        return None
+
+    metric_list = metrics.get("metrics", [])
+    if isinstance(metric_list, list):
+        for m in metric_list:
+            name = m.get("name", "")
+            value = m.get("value", 0)
+
+            if name == "reach":
+                result["accounts_reached"] = value if isinstance(value, int) else 0
+                breakdown = m.get("inline_insights_node", {})
+                if breakdown:
+                    follower_pct = breakdown.get("metrics", {}).get("follower_percentage", {}).get("value")
+                    if follower_pct is not None:
+                        result["reach_follower_pct"] = float(follower_pct)
+                        result["reach_non_follower_pct"] = round(100.0 - float(follower_pct), 2)
+            elif name == "impressions":
+                result["impressions"] = value if isinstance(value, int) else 0
+                breakdown = m.get("inline_insights_node", {}).get("metrics", {})
+                if breakdown:
+                    for source_key, dest_key in [
+                        ("impression_source_home", "from_home"),
+                        ("impression_source_feed", "from_home"),
+                        ("impression_source_profile", "from_profile"),
+                        ("impression_source_hashtag", "from_hashtags"),
+                        ("impression_source_explore", "from_explore"),
+                        ("impression_source_other", "from_other"),
+                        ("impression_source_location", "from_other"),
+                    ]:
+                        source_val = breakdown.get(source_key, {})
+                        if isinstance(source_val, dict):
+                            result[dest_key] += source_val.get("value", 0)
+                        elif isinstance(source_val, int):
+                            result[dest_key] += source_val
+            elif name in ("total_interactions", "actions"):
+                result["total_interactions"] = value if isinstance(value, int) else 0
+                breakdown = m.get("inline_insights_node", {})
+                if breakdown:
+                    follower_pct = breakdown.get("metrics", {}).get("follower_percentage", {}).get("value")
+                    if follower_pct is not None:
+                        result["interaction_follower_pct"] = float(follower_pct)
+            elif name == "saved":
+                result["saves"] = value if isinstance(value, int) else 0
+            elif name == "shares":
+                result["shares"] = value if isinstance(value, int) else 0
+            elif name == "profile_visits":
+                result["profile_visits"] = value if isinstance(value, int) else 0
+            elif name == "follows":
+                result["follows"] = value if isinstance(value, int) else 0
+
+    # Fallback: flat-dict format
+    if not metric_list:
+        for src, dst in [
+            ("reach", "accounts_reached"),
+            ("impressions", "impressions"),
+            ("saved", "saves"),
+            ("shares", "shares"),
+            ("profile_visits", "profile_visits"),
+            ("follows", "follows"),
+        ]:
+            val = metrics.get(src)
+            if isinstance(val, int):
+                result[dst] = val
+            elif isinstance(val, dict):
+                result[dst] = val.get("value", 0)
+
+    if result["accounts_reached"] > 0 or result["impressions"] > 0:
+        return result
+    return None
+
+
 def download_media(client, media_items, username, post_id):
     """Download media files to local storage."""
     media_dir = MEDIA_DIR / username / post_id
@@ -445,17 +557,24 @@ def sync_account(account, backend):
         if comments:
             logger.info(f"    {len(comments)} comments")
 
+        # Fetch insights (creator-only data)
+        delay(2, 4)
+        insights = fetch_post_insights(ig_client, pid)
+        if insights:
+            post["insights"] = insights
+            logger.info(f"    Insights: reached={insights['accounts_reached']}, impressions={insights['impressions']}")
+
         delay(2, 4)
 
     # 4. Re-fetch metrics for recent existing posts
-    logger.info("Re-snapshotting metrics for existing posts...")
+    logger.info("Re-snapshotting metrics + insights for existing posts...")
     resnapshots = []
     existing_posts_to_check = list(known_ids)[:20]
     for pid in existing_posts_to_check:
         delay(2, 4)
         detail = fetch_post_detail(ig_client, pid)
         if detail:
-            resnapshots.append({
+            entry = {
                 "platform_post_id": pid,
                 "metrics": {
                     "views": detail.get("play_count") or detail.get("view_count") or 0,
@@ -465,7 +584,17 @@ def sync_account(account, backend):
                     "saves": 0,
                     "reach": 0,
                 },
-            })
+            }
+            # Also fetch insights for existing posts
+            delay(2, 4)
+            insights = fetch_post_insights(ig_client, pid)
+            if insights:
+                entry["insights"] = insights
+                # Update shares/saves from insights (more accurate)
+                entry["metrics"]["shares"] = insights.get("shares", 0)
+                entry["metrics"]["saves"] = insights.get("saves", 0)
+                entry["metrics"]["reach"] = insights.get("accounts_reached", 0)
+            resnapshots.append(entry)
     logger.info(f"  Re-snapshotted {len(resnapshots)} existing posts")
 
     ig_client.close()

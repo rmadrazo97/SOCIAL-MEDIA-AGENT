@@ -57,7 +57,7 @@ class AIService:
             "recommendations": [],
         }
 
-    async def generate_diagnostic(self, post, metrics, baseline, comments=None) -> dict:
+    async def generate_diagnostic(self, post, metrics, baseline, comments=None, insights=None) -> dict:
         baseline_data = baseline.baseline_data if baseline else {}
         metrics_dict = {
             "views": metrics.views if metrics else 0,
@@ -70,15 +70,39 @@ class AIService:
 
         system_prompt = """You are a social media analytics expert. Analyze post performance relative to the creator's baseline.
 Also analyze the comment section sentiment and engagement quality if comments are provided.
+If Instagram Insights data is provided (reach, impressions, source breakdown, follower/non-follower ratios), analyze discovery potential and audience reach.
 Return JSON with these exact keys: summary (string), performance_label (one of: viral, above_average, average, below_average, underperforming),
 key_factors (array of objects with keys: factor, impact, explanation), what_to_repeat (array of strings), what_to_improve (array of strings),
-comment_analysis (object with keys: sentiment, themes (array of strings), engagement_quality, notable_comments (array of strings)) — include comment_analysis only if comments data is provided."""
+comment_analysis (object with keys: sentiment, themes (array of strings), engagement_quality, notable_comments (array of strings)) — include comment_analysis only if comments data is provided,
+discovery_analysis (object with keys: discovery_score (string: high/medium/low), non_follower_reach_pct (number), top_source (string), recommendation (string)) — include discovery_analysis only if insights data is provided."""
 
         user_prompt = f"""Post: {post.caption or 'No caption'}
 Type: {post.post_type}, Platform: {post.platform}
 Posted: {post.posted_at}
 Metrics: {json.dumps(metrics_dict)}
 Baseline: {json.dumps(baseline_data)}"""
+
+        if insights:
+            insights_dict = {
+                "accounts_reached": insights.accounts_reached,
+                "reach_follower_pct": float(insights.reach_follower_pct) if insights.reach_follower_pct else None,
+                "reach_non_follower_pct": float(insights.reach_non_follower_pct) if insights.reach_non_follower_pct else None,
+                "impressions": insights.impressions,
+                "impression_sources": {
+                    "home": insights.from_home,
+                    "profile": insights.from_profile,
+                    "hashtags": insights.from_hashtags,
+                    "explore": insights.from_explore,
+                    "other": insights.from_other,
+                },
+                "total_interactions": insights.total_interactions,
+                "interaction_follower_pct": float(insights.interaction_follower_pct) if insights.interaction_follower_pct else None,
+                "saves": insights.saves,
+                "shares": insights.shares,
+                "profile_visits": insights.profile_visits,
+                "follows_from_post": insights.follows,
+            }
+            user_prompt += f"\n\nInstagram Insights (creator analytics):\n{json.dumps(insights_dict)}"
 
         if comments:
             comments_text = "\n".join(
@@ -138,23 +162,34 @@ Total recent views: {total_views}, Total recent likes: {total_likes}"""
             result["content"] = result.get("summary", "No brief available.")
         return result
 
-    async def generate_recommendations(self, account, post_data, baseline) -> list[dict]:
+    async def generate_recommendations(self, account, post_data, baseline, insights_data=None) -> list[dict]:
         baseline_data = baseline.baseline_data if baseline else {}
 
         system_prompt = """You are a social media strategist. Generate actionable recommendations.
+If Instagram Insights data is available (reach, non-follower percentages, impression sources), use it to make discovery-focused recommendations.
 Return JSON with one key: recommendations (array of objects, each with keys: type, title, content, priority (integer 1-5), reasoning).
-Valid types: content_idea, timing, hashtag, format, engagement, remix."""
+Valid types: content_idea, timing, hashtag, format, engagement, remix, discovery."""
 
         posts_info = []
         for pd in post_data[:10]:
             p = pd["post"]
             m = pd["metrics"]
-            posts_info.append({
+            post_info = {
                 "caption": (p.caption or "")[:80],
                 "type": p.post_type,
                 "views": m.views if m else 0,
                 "engagement": float(m.engagement_rate) if m else 0,
-            })
+            }
+            # Include insights if available
+            ins = pd.get("insight")
+            if ins:
+                post_info["reach"] = ins.accounts_reached
+                post_info["non_follower_reach_pct"] = float(ins.reach_non_follower_pct) if ins.reach_non_follower_pct else None
+                post_info["from_explore"] = ins.from_explore
+                post_info["saves"] = ins.saves
+                post_info["shares"] = ins.shares
+                post_info["follows"] = ins.follows
+            posts_info.append(post_info)
 
         user_prompt = f"""Account: {account.username} ({account.platform})
 Recent posts: {json.dumps(posts_info)}

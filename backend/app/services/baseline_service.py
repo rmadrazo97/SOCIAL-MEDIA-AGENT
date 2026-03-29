@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Post, PostMetric, AccountBaseline
+from app.models.models import Post, PostMetric, PostInsight, AccountBaseline
 
 
 async def compute_baseline(account_id: UUID, db: AsyncSession) -> AccountBaseline:
@@ -25,6 +25,13 @@ async def compute_baseline(account_id: UUID, db: AsyncSession) -> AccountBaselin
     by_day = {}
     by_hour = {}
 
+    # Insights aggregation
+    reach_list = []
+    impressions_list = []
+    non_follower_pct_list = []
+    from_explore_list = []
+    follows_list = []
+
     for post in posts:
         result = await db.execute(
             select(PostMetric).where(PostMetric.post_id == post.id).order_by(desc(PostMetric.snapshot_at)).limit(1)
@@ -39,6 +46,19 @@ async def compute_baseline(account_id: UUID, db: AsyncSession) -> AccountBaselin
         shares_list.append(metric.shares)
         saves_list.append(metric.saves)
         engagement_list.append(float(metric.engagement_rate))
+
+        # Fetch latest insight for this post
+        insight_result = await db.execute(
+            select(PostInsight).where(PostInsight.post_id == post.id).order_by(desc(PostInsight.snapshot_at)).limit(1)
+        )
+        insight = insight_result.scalar_one_or_none()
+        if insight and insight.accounts_reached > 0:
+            reach_list.append(insight.accounts_reached)
+            impressions_list.append(insight.impressions)
+            if insight.reach_non_follower_pct is not None:
+                non_follower_pct_list.append(float(insight.reach_non_follower_pct))
+            from_explore_list.append(insight.from_explore)
+            follows_list.append(insight.follows)
 
         # By type
         pt = post.post_type
@@ -92,6 +112,18 @@ async def compute_baseline(account_id: UUID, db: AsyncSession) -> AccountBaselin
             "count": data["count"],
         }
 
+    # Insights baseline (only if we have insights data)
+    insights_baseline = {}
+    if reach_list:
+        insights_baseline = {
+            "avg_reach": safe_mean(reach_list),
+            "avg_impressions": safe_mean(impressions_list),
+            "avg_non_follower_reach_pct": safe_mean(non_follower_pct_list),
+            "avg_explore_impressions": safe_mean(from_explore_list),
+            "avg_follows_per_post": safe_mean(follows_list),
+            "posts_with_insights": len(reach_list),
+        }
+
     baseline_data = {
         "avg_views": safe_mean(views_list),
         "median_views": safe_median(views_list),
@@ -104,6 +136,7 @@ async def compute_baseline(account_id: UUID, db: AsyncSession) -> AccountBaselin
         "by_type": by_type_agg,
         "by_day": by_day_agg,
         "by_hour": by_hour_agg,
+        "insights": insights_baseline,
     }
 
     baseline = AccountBaseline(

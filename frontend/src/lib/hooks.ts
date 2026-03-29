@@ -46,6 +46,10 @@ export function useAccountGrowth(accountId: string | null, days = 30) {
   return useSWR(accountId ? `growth-${accountId}-${days}` : null, () => api.getAccountGrowth(accountId!, days));
 }
 
+export function usePostInsights(postId: string | null) {
+  return useSWR(postId ? `insights-${postId}` : null, () => api.getPostInsights(postId!));
+}
+
 export function usePostComments(postId: string | null) {
   return useSWR(postId ? `comments-${postId}` : null, () => api.getPostComments(postId!));
 }

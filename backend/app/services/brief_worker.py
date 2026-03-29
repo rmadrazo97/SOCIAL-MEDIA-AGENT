@@ -9,7 +9,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
-from app.models.models import Account, Post, PostMetric, DailyBrief, Recommendation, AccountBaseline
+from app.models.models import Account, Post, PostMetric, PostInsight, DailyBrief, Recommendation, AccountBaseline
 from app.services.ai_service import ai_service
 
 logger = logging.getLogger(__name__)
@@ -130,14 +130,18 @@ async def _generate_recommendations_for_account(account_id) -> None:
         )
         baseline = result.scalar_one_or_none()
 
-        # Collect metrics
+        # Collect metrics + insights
         post_data = []
         for p in posts:
             result = await db.execute(
                 select(PostMetric).where(PostMetric.post_id == p.id).order_by(desc(PostMetric.snapshot_at)).limit(1)
             )
             metric = result.scalar_one_or_none()
-            post_data.append({"post": p, "metrics": metric})
+            insight_result = await db.execute(
+                select(PostInsight).where(PostInsight.post_id == p.id).order_by(desc(PostInsight.snapshot_at)).limit(1)
+            )
+            insight = insight_result.scalar_one_or_none()
+            post_data.append({"post": p, "metrics": metric, "insight": insight})
 
         # Generate recommendations via AI
         recs = await ai_service.generate_recommendations(account, post_data, baseline)

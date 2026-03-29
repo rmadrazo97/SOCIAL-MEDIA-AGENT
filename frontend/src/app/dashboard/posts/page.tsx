@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useAccounts, usePosts } from '@/lib/hooks';
 import { api } from '@/lib/api';
-import { Eye, Heart, MessageCircle, Play, Image as ImageIcon, Layers, Film } from 'lucide-react';
+import { Eye, Heart, MessageCircle, Play, Image as ImageIcon, Layers, Film, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 
 function PostCard({ post }: { post: any }) {
@@ -34,7 +34,12 @@ function PostCard({ post }: { post: any }) {
       )}
 
       {/* Type badge */}
-      <div className="absolute top-2 right-2">
+      <div className="absolute top-2 right-2 flex items-center gap-1">
+        {post.latest_insight?.reach_non_follower_pct > 25 && (
+          <div className="bg-purple-500/80 rounded-full p-1" title={`${post.latest_insight.reach_non_follower_pct.toFixed(0)}% non-follower reach`}>
+            <TrendingUp className="w-3 h-3 text-white" />
+          </div>
+        )}
         <TypeIcon className="w-4 h-4 text-white drop-shadow-lg" />
       </div>
 

@@ -45,7 +45,7 @@ Browser → Next.js (3001) → [/api/* rewrite] → FastAPI (8001) → PostgreSQ
                          → [/copilotkit/* rewrite] → CopilotKit SDK (FastAPI)
                                                      ↓
                                               LangGraph Co-Pilot Agent
-                                              (14 tools: query + action)
+                                              (17 tools: query + action)
                                                      ↓
                                               APScheduler (cron)
                                                      ↓
@@ -67,12 +67,12 @@ There are no user accounts, sessions, or JWTs.
 | `config.py` | `Settings(BaseSettings)` — all env vars loaded here |
 | `database.py` | Async SQLAlchemy engine, `get_db()` dependency |
 | `init_db.py` | Creates tables on startup (called in docker CMD) |
-| `models/models.py` | 10 SQLAlchemy models: Account, Post, PostMetric, Insight, Recommendation, DailyBrief, AccountBaseline, Artifact, AgentConversation, AgentMemoryEntry |
+| `models/models.py` | 11 SQLAlchemy models: Account, Post, PostMetric, PostInsight, PostComment, Insight, Recommendation, DailyBrief, AccountBaseline, Artifact, AgentConversation, AgentMemoryEntry |
 | `schemas/schemas.py` | All Pydantic request/response schemas |
 | `api/auth.py` | `POST /api/auth/login` |
 | `api/accounts.py` | CRUD for accounts |
-| `api/posts.py` | CRUD for posts + metrics |
-| `api/insights.py` | AI diagnostic generation |
+| `api/posts.py` | CRUD for posts + metrics + public media serving endpoints |
+| `api/insights.py` | AI diagnostic generation (includes comments + Instagram Insights) |
 | `api/recommendations.py` | List + status update for recommendations |
 | `api/briefs.py` | Daily brief CRUD + generation |
 | `api/metrics.py` | Aggregated metrics + baselines |
@@ -88,7 +88,7 @@ There are no user accounts, sessions, or JWTs.
 | `services/brief_worker.py` | Batch brief + recommendation generation |
 | `workers/scheduler.py` | APScheduler job setup (4 cron jobs) |
 | `agent/copilot.py` | LangGraph Co-Pilot agent definition (StateGraph + CopilotKitState) |
-| `agent/tools/query_tools.py` | 8 read-only tools: accounts, posts, metrics, baselines, briefs, recommendations, artifacts |
+| `agent/tools/query_tools.py` | 11 read-only tools: accounts, posts, metrics, baselines, briefs, recommendations, artifacts, post insights, comments, media analysis |
 | `agent/tools/action_tools.py` | 6 action tools: sync, diagnostic, brief generation, recommendation status, artifact CRUD |
 | `agent/prompts/system.py` | Co-Pilot system prompt (persona, guidelines, capabilities) |
 | `api/agent.py` | `register_copilotkit()` — registers CopilotKit SDK endpoint on FastAPI |
@@ -105,8 +105,8 @@ There are no user accounts, sessions, or JWTs.
 | `app/dashboard/page.tsx` | Main dashboard: metrics cards, brief, recommendations, recent posts |
 | `app/dashboard/layout.tsx` | Dashboard shell with CopilotKit provider + floating chat popup |
 | `app/dashboard/accounts/page.tsx` | Account management: add, sync, CSV import, delete |
-| `app/dashboard/posts/page.tsx` | Posts table with filtering |
-| `app/dashboard/posts/[id]/page.tsx` | Post detail: metrics, history, AI diagnostic, remix |
+| `app/dashboard/posts/page.tsx` | Instagram-style 3-column grid with thumbnails, hover metric overlays, type filters |
+| `app/dashboard/posts/[id]/page.tsx` | Post detail: media gallery, metrics, history, comments, Instagram Insights, AI diagnostic, remix |
 | `app/dashboard/recommendations/page.tsx` | Recommendations with accept/dismiss |
 | `app/dashboard/settings/page.tsx` | Settings page |
 | `components/layout/DashboardLayout.tsx` | Sidebar + header layout component |
@@ -137,6 +137,23 @@ All models use UUID primary keys. All timestamps are timezone-aware.
 - `engagement_rate` (numeric 7,4)
 - `performance_score` (numeric 5,2, nullable)
 - Index: `(post_id, snapshot_at)`
+
+### PostInsight
+- `post_id` → Post (cascade delete)
+- `snapshot_at` (datetime, default now)
+- `accounts_reached`, `impressions`, `total_interactions` (int)
+- `reach_follower_pct`, `reach_non_follower_pct`, `interaction_follower_pct` (numeric)
+- Impression sources: `from_home`, `from_profile`, `from_hashtags`, `from_explore`, `from_other` (int)
+- `saves`, `shares`, `profile_visits`, `follows` (int)
+- Creator-only data scraped from Instagram Insights (`/insights/media/{media_pk}/`)
+
+### PostComment
+- `post_id` → Post (cascade delete)
+- `platform_comment_id` (string)
+- `username` (string), `text` (text)
+- `comment_like_count`, `reply_count` (int)
+- `commented_at` (datetime)
+- Unique constraint: `(post_id, platform_comment_id)`
 
 ### Insight
 - `post_id` → Post (nullable, cascade)
@@ -181,11 +198,12 @@ All models use UUID primary keys. All timestamps are timezone-aware.
 
 ## API Conventions
 
-- All endpoints except `/api/auth/login` and `/health` require the `X-App-Password` header
+- All endpoints except `/api/auth/login`, `/health`, and media serving endpoints require the `X-App-Password` header
+- Media endpoints (`/api/posts/{id}/media/*`) are public (no auth) because `<img>`/`<video>` tags can't send custom headers
 - Responses are JSON; errors return `{"detail": "message"}`
 - 401 = bad password, 404 = not found, 204 = deleted
 - List endpoints return arrays directly (not paginated wrappers)
-- Posts endpoints return `PostWithMetrics` which includes `latest_metrics` (most recent PostMetric snapshot)
+- Posts endpoints return `PostWithMetrics` which includes `latest_metrics` (most recent PostMetric snapshot) and `latest_insight` (most recent PostInsight)
 - Background tasks (sync, briefs) return `{"status": "..._started"}` immediately
 - CopilotKit agent endpoint at `/copilotkit` (registered by `register_copilotkit()`, not a standard API router)
 - Artifact CRUD at `/api/artifacts` (GET, POST, PATCH, DELETE)
@@ -222,7 +240,7 @@ Defined in `backend/app/workers/scheduler.py`:
 - Model: `moonshot-v1-8k`
 - Falls back to mock/template responses if API key is missing or call fails
 - All prompts request JSON responses
-- Methods: `generate_diagnostic()`, `generate_daily_brief()`, `generate_recommendations()`, `generate_remix()`
+- Methods: `generate_diagnostic()` (with comments + insights), `generate_daily_brief()`, `generate_recommendations()`, `generate_remix()`, `describe_post_media()`
 
 ## Co-Pilot Agent (`agent/`)
 
@@ -234,10 +252,10 @@ Conversational AI assistant embedded as a floating chat widget on all dashboard 
 - **Frontend**: `<CopilotKit>` provider + `<CopilotPopup>` in `dashboard/layout.tsx`
 - **Tools access the DB directly** via SQLAlchemy (not HTTP calls) to avoid deadlock with single-worker uvicorn
 
-### Agent Tools (14 total)
+### Agent Tools (17 total)
 
-**Query tools** (8 — read-only):
-`get_accounts`, `get_account_metrics`, `get_account_baseline`, `get_posts`, `get_post_detail`, `get_daily_brief`, `get_recommendations`, `list_artifacts`
+**Query tools** (11 — read-only):
+`get_accounts`, `get_account_metrics`, `get_account_baseline`, `get_posts`, `get_post_detail`, `get_post_insights`, `get_post_comments`, `get_daily_brief`, `get_recommendations`, `list_artifacts`, `analyze_post_media`
 
 **Action tools** (6 — mutate state):
 `trigger_sync`, `generate_post_diagnostic`, `generate_brief`, `update_recommendation_status`, `save_artifact`, `retrieve_artifact`
@@ -366,6 +384,8 @@ make clean             # Remove containers, volumes, build cache
 | `backup_db.sh` | Backup database to `backups/` (keeps last 10) |
 | `restore_db.sh` | Restore database from a backup file |
 | `seed_sample_data.py` | Populate DB with sample posts and metrics |
+| `ig_sync.py` | Standalone Instagram sync script using browser session cookies |
+| `test_insights_api.py` | Test script for Instagram Insights API endpoints |
 
 ## Common Commands
 

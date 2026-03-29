@@ -424,6 +424,142 @@ class InstagramWebScraper:
             return None
 
     # ──────────────────────────────────────────────
+    # Post Insights (creator-only)
+    # ──────────────────────────────────────────────
+
+    async def get_post_insights(self, media_pk: str) -> dict | None:
+        """
+        Fetch creator-only insights for a post (reach, impressions, sources, etc.).
+        Only works for posts owned by the session user.
+        Uses Instagram's private API: /api/v1/insights/media_organic_insights/{media_pk}/
+        """
+        if not self.is_configured():
+            return None
+
+        try:
+            r = await self._safe_get(
+                f"https://www.instagram.com/api/v1/insights/media_organic_insights/{media_pk}/",
+                params={"ig_filters": "{}"},
+                referer=f"https://www.instagram.com/",
+            )
+            if not r:
+                return None
+
+            data = r.json()
+            return self._parse_insights_response(data)
+
+        except Exception as e:
+            logger.debug(f"Insights not available for media {media_pk}: {e}")
+            return None
+
+    def _parse_insights_response(self, data: dict) -> dict | None:
+        """
+        Parse the insights API response into a flat dict.
+        The response structure varies but typically contains metrics as a list of
+        metric objects with name/value/description fields.
+        """
+        try:
+            result = {
+                "accounts_reached": 0,
+                "reach_follower_pct": None,
+                "reach_non_follower_pct": None,
+                "impressions": 0,
+                "from_home": 0,
+                "from_profile": 0,
+                "from_hashtags": 0,
+                "from_explore": 0,
+                "from_other": 0,
+                "total_interactions": 0,
+                "interaction_follower_pct": None,
+                "saves": 0,
+                "shares": 0,
+                "profile_visits": 0,
+                "follows": 0,
+            }
+
+            # Try parsing the organic insights format
+            metrics = data.get("media_organic_insights", data)
+
+            # Handle list-of-metric-objects format
+            if isinstance(metrics, dict):
+                metric_list = metrics.get("metrics", [])
+                if isinstance(metric_list, list):
+                    for m in metric_list:
+                        name = m.get("name", "")
+                        value = m.get("value", 0)
+
+                        if name == "reach":
+                            result["accounts_reached"] = value if isinstance(value, int) else 0
+                            # Check for follower/non-follower breakdown
+                            breakdown = m.get("inline_insights_node", {})
+                            if breakdown:
+                                follower_pct = breakdown.get("metrics", {}).get("follower_percentage", {}).get("value")
+                                if follower_pct is not None:
+                                    result["reach_follower_pct"] = float(follower_pct)
+                                    result["reach_non_follower_pct"] = round(100.0 - float(follower_pct), 2)
+                        elif name == "impressions":
+                            result["impressions"] = value if isinstance(value, int) else 0
+                            # Source breakdown
+                            breakdown = m.get("inline_insights_node", {}).get("metrics", {})
+                            if breakdown:
+                                for source_key, dest_key in [
+                                    ("impression_source_home", "from_home"),
+                                    ("impression_source_feed", "from_home"),
+                                    ("impression_source_profile", "from_profile"),
+                                    ("impression_source_hashtag", "from_hashtags"),
+                                    ("impression_source_explore", "from_explore"),
+                                    ("impression_source_other", "from_other"),
+                                    ("impression_source_location", "from_other"),
+                                ]:
+                                    source_val = breakdown.get(source_key, {})
+                                    if isinstance(source_val, dict):
+                                        result[dest_key] += source_val.get("value", 0)
+                                    elif isinstance(source_val, int):
+                                        result[dest_key] += source_val
+                        elif name in ("total_interactions", "actions"):
+                            result["total_interactions"] = value if isinstance(value, int) else 0
+                            breakdown = m.get("inline_insights_node", {})
+                            if breakdown:
+                                follower_pct = breakdown.get("metrics", {}).get("follower_percentage", {}).get("value")
+                                if follower_pct is not None:
+                                    result["interaction_follower_pct"] = float(follower_pct)
+                        elif name == "saved":
+                            result["saves"] = value if isinstance(value, int) else 0
+                        elif name == "shares":
+                            result["shares"] = value if isinstance(value, int) else 0
+                        elif name == "profile_visits":
+                            result["profile_visits"] = value if isinstance(value, int) else 0
+                        elif name == "follows":
+                            result["follows"] = value if isinstance(value, int) else 0
+
+                # Also try flat-dict format (alternative response shape)
+                if not metric_list:
+                    for key_map in [
+                        ("reach", "accounts_reached"),
+                        ("impressions", "impressions"),
+                        ("saved", "saves"),
+                        ("shares", "shares"),
+                        ("profile_visits", "profile_visits"),
+                        ("follows", "follows"),
+                    ]:
+                        src, dst = key_map
+                        val = metrics.get(src)
+                        if isinstance(val, int):
+                            result[dst] = val
+                        elif isinstance(val, dict):
+                            result[dst] = val.get("value", 0)
+
+            # Only return if we got meaningful data
+            if result["accounts_reached"] > 0 or result["impressions"] > 0:
+                return result
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to parse insights response: {e}")
+            return None
+
+    # ──────────────────────────────────────────────
     # Comments
     # ──────────────────────────────────────────────
 

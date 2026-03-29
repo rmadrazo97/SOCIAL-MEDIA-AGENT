@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.api.deps import verify_password
-from app.models.models import Account, Post, PostMetric, PostComment, ProfileSnapshot
-from app.services.sync_service import sync_account, sync_all_accounts, compute_all_baselines, _upsert_post, _snapshot_metrics, _upsert_comment
+from app.models.models import Account, Post, PostMetric, PostComment, ProfileSnapshot, PostInsight
+from app.services.sync_service import sync_account, sync_all_accounts, compute_all_baselines, _upsert_post, _snapshot_metrics, _upsert_comment, _snapshot_insights
 from app.services.brief_worker import generate_all_briefs, generate_all_recommendations
 from app.integrations.instagram_web_scraper import instagram_web_scraper
 
@@ -88,7 +88,7 @@ async def receive_ig_sync_data(account_id: UUID, data: dict, db: AsyncSession = 
     if not account:
         return {"error": "Account not found"}
 
-    result = {"profile_updated": False, "new_posts": 0, "updated_posts": 0, "comments": 0, "resnapshots": 0}
+    result = {"profile_updated": False, "new_posts": 0, "updated_posts": 0, "comments": 0, "resnapshots": 0, "insights": 0}
 
     # 1. Update profile
     profile = data.get("profile")
@@ -128,6 +128,10 @@ async def receive_ig_sync_data(account_id: UUID, data: dict, db: AsyncSession = 
             await _upsert_comment(db, post, comment)
             result["comments"] += 1
 
+        if post_data.get("insights"):
+            await _snapshot_insights(db, post, post_data["insights"])
+            result["insights"] += 1
+
     # 3. Metric resnapshots for existing posts
     for rs in data.get("metric_resnapshots", []):
         pid = rs.get("platform_post_id")
@@ -140,6 +144,9 @@ async def receive_ig_sync_data(account_id: UUID, data: dict, db: AsyncSession = 
         if post and rs.get("metrics"):
             await _snapshot_metrics(db, post, rs["metrics"])
             result["resnapshots"] += 1
+        if post and rs.get("insights"):
+            await _snapshot_insights(db, post, rs["insights"])
+            result["insights"] += 1
 
     account.last_sync_at = datetime.now(timezone.utc)
     await db.commit()

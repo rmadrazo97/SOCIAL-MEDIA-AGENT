@@ -8,8 +8,8 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.api.deps import verify_password
-from app.models.models import Post, PostMetric, PostComment
-from app.schemas.schemas import PostCreate, PostOut, PostMetricCreate, PostMetricOut, PostWithMetrics, PostCommentOut
+from app.models.models import Post, PostMetric, PostComment, PostInsight
+from app.schemas.schemas import PostCreate, PostOut, PostMetricCreate, PostMetricOut, PostWithMetrics, PostCommentOut, PostInsightOut
 from app.config import settings
 
 router = APIRouter(prefix="/api", tags=["posts"], dependencies=[Depends(verify_password)])
@@ -25,7 +25,11 @@ async def list_posts(
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Post).where(Post.account_id == account_id).options(selectinload(Post.metrics))
+    q = (
+        select(Post)
+        .where(Post.account_id == account_id)
+        .options(selectinload(Post.metrics), selectinload(Post.post_insights))
+    )
     if platform:
         q = q.where(Post.platform == platform)
     if post_type:
@@ -40,8 +44,13 @@ async def list_posts(
         if p.metrics:
             latest_m = max(p.metrics, key=lambda m: m.snapshot_at)
             latest = PostMetricOut.model_validate(latest_m)
+        latest_insight = None
+        if p.post_insights:
+            latest_i = max(p.post_insights, key=lambda i: i.snapshot_at)
+            latest_insight = PostInsightOut.model_validate(latest_i)
         pw = PostWithMetrics.model_validate(p)
         pw.latest_metrics = latest
+        pw.latest_insight = latest_insight
         out.append(pw)
     return out
 
@@ -58,7 +67,9 @@ async def create_post(data: PostCreate, db: AsyncSession = Depends(get_db)):
 @router.get("/posts/{post_id}", response_model=PostWithMetrics)
 async def get_post(post_id: UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(Post).where(Post.id == post_id).options(selectinload(Post.metrics))
+        select(Post).where(Post.id == post_id).options(
+            selectinload(Post.metrics), selectinload(Post.post_insights)
+        )
     )
     post = result.scalar_one_or_none()
     if not post:
@@ -67,8 +78,13 @@ async def get_post(post_id: UUID, db: AsyncSession = Depends(get_db)):
     if post.metrics:
         latest_m = max(post.metrics, key=lambda m: m.snapshot_at)
         latest = PostMetricOut.model_validate(latest_m)
+    latest_insight = None
+    if post.post_insights:
+        latest_i = max(post.post_insights, key=lambda i: i.snapshot_at)
+        latest_insight = PostInsightOut.model_validate(latest_i)
     pw = PostWithMetrics.model_validate(post)
     pw.latest_metrics = latest
+    pw.latest_insight = latest_insight
     return pw
 
 
@@ -100,6 +116,16 @@ async def create_post_metric(post_id: UUID, data: PostMetricCreate, db: AsyncSes
     await db.commit()
     await db.refresh(metric)
     return metric
+
+
+# Insights (creator-only analytics)
+@router.get("/posts/{post_id}/insights", response_model=list[PostInsightOut])
+async def list_post_insights(post_id: UUID, db: AsyncSession = Depends(get_db)):
+    """List all insight snapshots for a post (reach, impressions, source breakdown)."""
+    result = await db.execute(
+        select(PostInsight).where(PostInsight.post_id == post_id).order_by(PostInsight.snapshot_at)
+    )
+    return result.scalars().all()
 
 
 # Comments

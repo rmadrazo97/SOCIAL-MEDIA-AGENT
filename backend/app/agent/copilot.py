@@ -1,9 +1,10 @@
 """Social Media Co-Pilot agent — LangGraph agent with CopilotKit integration."""
+import json
 import logging
 from typing import List
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, ToolMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
@@ -25,13 +26,47 @@ class AgentState(CopilotKitState):
     pass
 
 
+def _extract_images_from_tool_messages(messages: list) -> list:
+    """Scan tool messages for base64 images and convert them to multimodal content.
+
+    When analyze_post_media returns images_base64, we inject them as a multimodal
+    HumanMessage so the vision LLM can actually see the images.
+    """
+    enhanced = []
+    for msg in messages:
+        enhanced.append(msg)
+        # Check if this is a ToolMessage with base64 images
+        if isinstance(msg, ToolMessage):
+            try:
+                data = json.loads(msg.content) if isinstance(msg.content, str) else msg.content
+                images = data.get("images_base64", []) if isinstance(data, dict) else []
+                if images:
+                    # Build multimodal content blocks
+                    content_blocks = [
+                        {"type": "text", "text": f"Here are the {len(images)} image(s) from this post for visual analysis:"}
+                    ]
+                    for img in images:
+                        content_blocks.append({
+                            "type": "image_url",
+                            "image_url": {"url": img["data_url"]},
+                        })
+                    enhanced.append(HumanMessage(content=content_blocks))
+                    # Remove base64 from tool message to save tokens
+                    data_clean = {k: v for k, v in data.items() if k != "images_base64"}
+                    data_clean["images_injected"] = True
+                    msg.content = json.dumps(data_clean)
+            except (json.JSONDecodeError, TypeError, KeyError):
+                pass
+    return enhanced
+
+
 async def chat_node(state: AgentState, config: RunnableConfig) -> Command[Literal["tool_node", "__end__"]]:
     """Main chat node — invokes the LLM with tools bound."""
     llm = ChatOpenAI(
         base_url="https://api.moonshot.ai/v1",
         api_key=settings.MOONSHOT_API_KEY or "dummy-key",
-        model="moonshot-v1-8k",
-        temperature=0.3,
+        model="kimi-k2.5",
+        temperature=1,
         streaming=True,
     )
 
@@ -39,8 +74,11 @@ async def chat_node(state: AgentState, config: RunnableConfig) -> Command[Litera
     copilotkit_actions = state.get("copilotkit", {}).get("actions", [])
     model_with_tools = llm.bind_tools([*all_tools, *copilotkit_actions])
 
+    # Extract base64 images from tool results and inject as multimodal messages
+    messages = _extract_images_from_tool_messages(state["messages"])
+
     response = await model_with_tools.ainvoke(
-        [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]],
+        [SystemMessage(content=SYSTEM_PROMPT), *messages],
         config,
     )
 

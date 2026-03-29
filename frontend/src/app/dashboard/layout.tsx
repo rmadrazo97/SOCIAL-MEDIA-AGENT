@@ -15,7 +15,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }
   }, [router]);
 
-  const runtimeUrl = '/copilotkit';
+  const runtimeUrl = '/api/copilotkit';
 
   return (
     <CopilotKit runtimeUrl={runtimeUrl} agent="social_media_copilot">

@@ -71,6 +71,7 @@ class PostOut(BaseModel):
 
 class PostWithMetrics(PostOut):
     latest_metrics: "PostMetricOut | None" = None
+    latest_insight: "PostInsightOut | None" = None
 
 
 # PostMetric
@@ -97,6 +98,50 @@ class PostMetricOut(BaseModel):
     reach: int
     engagement_rate: float
     performance_score: float | None
+
+    class Config:
+        from_attributes = True
+
+
+# Post Insight (Instagram creator-only analytics)
+class PostInsightCreate(BaseModel):
+    post_id: UUID
+    accounts_reached: int = 0
+    reach_follower_pct: float | None = None
+    reach_non_follower_pct: float | None = None
+    impressions: int = 0
+    from_home: int = 0
+    from_profile: int = 0
+    from_hashtags: int = 0
+    from_explore: int = 0
+    from_other: int = 0
+    total_interactions: int = 0
+    interaction_follower_pct: float | None = None
+    saves: int = 0
+    shares: int = 0
+    profile_visits: int = 0
+    follows: int = 0
+
+
+class PostInsightOut(BaseModel):
+    id: UUID
+    post_id: UUID
+    snapshot_at: datetime
+    accounts_reached: int
+    reach_follower_pct: float | None
+    reach_non_follower_pct: float | None
+    impressions: int
+    from_home: int
+    from_profile: int
+    from_hashtags: int
+    from_explore: int
+    from_other: int
+    total_interactions: int
+    interaction_follower_pct: float | None
+    saves: int
+    shares: int
+    profile_visits: int
+    follows: int
 
     class Config:
         from_attributes = True

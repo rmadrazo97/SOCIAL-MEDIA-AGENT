@@ -11,7 +11,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
-from app.models.models import Account, Post, PostMetric, PostComment, ProfileSnapshot
+from app.models.models import Account, Post, PostMetric, PostComment, ProfileSnapshot, PostInsight
 from app.integrations.instagram_web_scraper import instagram_web_scraper
 from app.integrations.tiktok_scraper import tiktok_scraper
 from app.services.baseline_service import compute_baseline
@@ -337,6 +337,30 @@ async def _upsert_comment(db: AsyncSession, post: Post, comment_data: dict) -> N
             commented_at=commented_at or datetime.now(timezone.utc),
         )
         db.add(comment)
+
+
+async def _snapshot_insights(db: AsyncSession, post: Post, insights: dict) -> PostInsight:
+    """Create a new insights snapshot for a post."""
+    insight = PostInsight(
+        post_id=post.id,
+        accounts_reached=insights.get("accounts_reached", 0),
+        reach_follower_pct=insights.get("reach_follower_pct"),
+        reach_non_follower_pct=insights.get("reach_non_follower_pct"),
+        impressions=insights.get("impressions", 0),
+        from_home=insights.get("from_home", 0),
+        from_profile=insights.get("from_profile", 0),
+        from_hashtags=insights.get("from_hashtags", 0),
+        from_explore=insights.get("from_explore", 0),
+        from_other=insights.get("from_other", 0),
+        total_interactions=insights.get("total_interactions", 0),
+        interaction_follower_pct=insights.get("interaction_follower_pct"),
+        saves=insights.get("saves", 0),
+        shares=insights.get("shares", 0),
+        profile_visits=insights.get("profile_visits", 0),
+        follows=insights.get("follows", 0),
+    )
+    db.add(insight)
+    return insight
 
 
 async def _resnapshot_existing_posts(db: AsyncSession, account: Account, limit: int = 20) -> int:
