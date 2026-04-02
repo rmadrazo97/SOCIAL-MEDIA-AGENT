@@ -8,7 +8,9 @@
 .PHONY: help up down build rebuild logs status health \
         sync sync-all baselines briefs recs \
         db-shell db-reset db-dump db-counts \
-        seed tunnel lint test clean
+        seed tunnel lint test clean \
+        fly-setup fly-secrets fly-deploy fly-deploy-backend fly-deploy-frontend \
+        fly-status fly-logs fly-logs-backend fly-logs-frontend fly-db fly-destroy
 
 # -- Core lifecycle -----------------------------------------------------------
 
@@ -134,3 +136,38 @@ clean: ## Remove containers, volumes, and build cache
 
 prune: ## Remove all stopped containers and dangling images
 	docker system prune -f
+
+# -- Fly.io deployment --------------------------------------------------------
+
+fly-setup: ## Provision Fly.io infrastructure (apps, Postgres, Redis, volumes)
+	@./scripts/fly-deploy.sh setup
+
+fly-secrets: ## Push secrets from .env to Fly apps
+	@./scripts/fly-deploy.sh secrets
+
+fly-deploy: ## Deploy both backend and frontend to Fly.io
+	@./scripts/fly-deploy.sh deploy
+
+fly-deploy-backend: ## Deploy backend to Fly.io
+	@./scripts/fly-deploy.sh deploy-backend
+
+fly-deploy-frontend: ## Deploy frontend to Fly.io
+	@./scripts/fly-deploy.sh deploy-frontend
+
+fly-status: ## Show Fly.io resource status
+	@./scripts/fly-deploy.sh status
+
+fly-logs: ## Tail Fly.io logs (both services)
+	@./scripts/fly-deploy.sh logs
+
+fly-logs-backend: ## Tail Fly.io backend logs
+	@./scripts/fly-deploy.sh logs-backend
+
+fly-logs-frontend: ## Tail Fly.io frontend logs
+	@./scripts/fly-deploy.sh logs-frontend
+
+fly-db: ## Open psql console to Fly Postgres
+	@./scripts/fly-deploy.sh db-console
+
+fly-destroy: ## Destroy all Fly.io resources (DESTRUCTIVE)
+	@./scripts/fly-deploy.sh destroy

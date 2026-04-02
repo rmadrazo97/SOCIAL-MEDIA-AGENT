@@ -1,0 +1,33 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm install --legacy-peer-deps
+
+COPY . .
+
+# Set backend URL for Next.js rewrites (baked into build)
+ARG BACKEND_URL=http://sma-backend.internal:8000
+ENV BACKEND_URL=$BACKEND_URL
+
+# Build the Next.js app in standalone mode
+RUN npm run build
+
+# --- Production stage ---
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Copy standalone output
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+# Copy public dir if it exists (optional)
+RUN mkdir -p ./public
+COPY --from=builder /app/package.json ./package.json
+
+EXPOSE 3000
+
+CMD ["node", "server.js"]

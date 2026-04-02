@@ -53,6 +53,7 @@ class PostOut(BaseModel):
     id: UUID
     account_id: UUID
     platform: str
+    platform_post_id: str | None = None
     post_type: str
     caption: str | None
     media_url: str | None

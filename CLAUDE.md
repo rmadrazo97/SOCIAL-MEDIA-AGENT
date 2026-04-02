@@ -353,11 +353,70 @@ These are available as `/command` in Claude Code:
 | `/add-ai-feature` | Add a new AI-powered feature |
 | `/db-inspect` | Inspect database tables, counts, and recent activity |
 
+## Fly.io Deployment (Production)
+
+The app deploys to Fly.io as two separate apps communicating over Fly's private network.
+All infrastructure is defined as code in `fly.toml` files and the deploy script.
+
+### Architecture
+
+```
+Internet → sma-frontend.fly.dev (Next.js standalone)
+              ↓ Next.js rewrites /api/* and /copilotkit/*
+           sma-backend.internal:8000 (FastAPI, 2 workers)
+              ↓
+           sma-db (Fly Postgres, shared-cpu-1x, 1GB disk)
+              + sma-redis (Upstash Redis via Fly)
+              + sma_media volume (1GB, mounted at /data/media)
+```
+
+All services in `iad` (Ashburn, Virginia) region. Frontend → backend uses Fly internal DNS (no public internet hop).
+
+### IaC Files
+
+| File | Purpose |
+|------|---------|
+| `backend/fly.toml` | Backend Fly app config (VM size, health checks, volume mount, env) |
+| `backend/Dockerfile.fly` | Production backend image (no --reload, 2 workers) |
+| `frontend/fly.toml` | Frontend Fly app config (VM size, health checks, backend URL) |
+| `frontend/Dockerfile.fly` | Multi-stage Next.js standalone production build |
+| `scripts/fly-deploy.sh` | Idempotent provisioning + deployment script |
+
+### Deployment Commands
+
+```bash
+# First time: provision infrastructure
+make fly-setup              # Create apps, Postgres, Redis, volume
+make fly-secrets            # Push .env secrets to Fly apps
+
+# Deploy
+make fly-deploy             # Deploy both services
+make fly-deploy-backend     # Deploy backend only
+make fly-deploy-frontend    # Deploy frontend only
+
+# Operations
+make fly-status             # Show all resource status
+make fly-logs               # Tail logs (both services)
+make fly-logs-backend       # Tail backend logs
+make fly-logs-frontend      # Tail frontend logs
+make fly-db                 # Open psql to Fly Postgres
+make fly-destroy            # Tear down everything (DESTRUCTIVE)
+```
+
+### Key Details
+
+- **DATABASE_URL**: Set automatically when Fly Postgres is attached. `config.py` auto-converts `postgres://` → `postgresql+asyncpg://`.
+- **Secrets**: Pushed from `.env` via `fly-deploy.sh secrets`. Never committed to git.
+- **Media volume**: 1GB persistent volume on backend at `/data/media` for downloaded Instagram media.
+- **Machines**: Auto-suspend when idle, auto-start on request. Min 1 machine always running per service.
+- **Config changes**: Edit `fly.toml` files, then re-deploy. Config is the source of truth.
+
 ## Makefile Targets
 
 Run `make help` for the full list. Key targets:
 
 ```bash
+# Local development
 make up                # Start all services
 make build             # Build and start (after Dockerfile changes)
 make logs              # Tail all logs
@@ -374,12 +433,22 @@ make db-dump           # Backup database to SQL file
 make seed              # Populate DB with sample data
 make tunnel            # Expose frontend via ngrok
 make clean             # Remove containers, volumes, build cache
+
+# Fly.io production
+make fly-setup         # Provision Fly.io infrastructure
+make fly-secrets       # Push secrets from .env
+make fly-deploy        # Deploy both services
+make fly-status        # Show resource status
+make fly-logs          # Tail production logs
+make fly-db            # Open Fly Postgres console
+make fly-destroy       # Tear down all resources
 ```
 
 ## Scripts (`scripts/`)
 
 | Script | Purpose |
 |--------|---------|
+| `fly-deploy.sh` | Fly.io IaC: provision, secrets, deploy, destroy |
 | `health_check.sh` | Full health check with colored output |
 | `backup_db.sh` | Backup database to `backups/` (keeps last 10) |
 | `restore_db.sh` | Restore database from a backup file |

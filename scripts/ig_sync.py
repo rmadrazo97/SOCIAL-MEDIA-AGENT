@@ -351,26 +351,176 @@ def fetch_post_detail(client, media_pk):
 
 
 def fetch_post_insights(client, media_pk):
-    """Fetch creator-only insights for a post (reach, impressions, sources, etc.)."""
-    try:
-        r = client.get(
-            f"https://www.instagram.com/api/v1/insights/media_organic_insights/{media_pk}/",
-            params={"ig_filters": "{}"},
-            headers=get_headers(),
-            cookies=get_cookies(),
-        )
-        if r.status_code != 200:
-            return None
+    """Fetch insights by rendering the web insights page with Playwright.
 
-        data = r.json()
-        return parse_insights_response(data)
+    For batch fetching, use fetch_batch_insights() instead to reuse the browser.
+    """
+    results = fetch_batch_insights([media_pk])
+    return results.get(media_pk)
+
+
+def fetch_batch_insights(media_pks):
+    """Fetch insights for multiple posts using a single Playwright browser session."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                return pool.submit(asyncio.run, _batch_insights_playwright(media_pks)).result()
+        return loop.run_until_complete(_batch_insights_playwright(media_pks))
+    except RuntimeError:
+        return asyncio.run(_batch_insights_playwright(media_pks))
+
+
+async def _batch_insights_playwright(media_pks):
+    """Use a single Playwright browser to scrape insights for multiple posts."""
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        logger.warning("Playwright not installed — skipping insights. Install with: pip install playwright && python -m playwright install chromium")
+        return {}
+
+    results = {}
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            )
+            ds_user_id = INSTAGRAM_SESSION_ID.split("%3A")[0] if "%3A" in INSTAGRAM_SESSION_ID else INSTAGRAM_SESSION_ID.split(":")[0]
+            await context.add_cookies([
+                {"name": "sessionid", "value": INSTAGRAM_SESSION_ID, "domain": ".instagram.com", "path": "/"},
+                {"name": "csrftoken", "value": INSTAGRAM_CSRF_TOKEN, "domain": ".instagram.com", "path": "/"},
+                {"name": "ds_user_id", "value": ds_user_id, "domain": ".instagram.com", "path": "/"},
+            ])
+
+            page = await context.new_page()
+
+            for i, media_pk in enumerate(media_pks):
+                try:
+                    await page.goto(
+                        f"https://www.instagram.com/insights/media/{media_pk}/",
+                        wait_until="domcontentloaded",
+                        timeout=30000,
+                    )
+                    await asyncio.sleep(10)
+
+                    text = await page.inner_text("body")
+                    parsed = parse_insights_page_text(text)
+                    if parsed:
+                        results[media_pk] = parsed
+                        logger.info(f"    Insights ({i+1}/{len(media_pks)}): reached={parsed['accounts_reached']}, impressions={parsed['impressions']}")
+                    else:
+                        logger.debug(f"    Insights ({i+1}/{len(media_pks)}): no data for {media_pk}")
+
+                    # Brief delay between pages
+                    if i < len(media_pks) - 1:
+                        await asyncio.sleep(random.uniform(1, 3))
+                except Exception as e:
+                    logger.debug(f"    Insights scrape failed for {media_pk}: {e}")
+
+            await browser.close()
     except Exception as e:
-        logger.debug(f"Insights not available for {media_pk}: {e}")
+        logger.error(f"Playwright batch insights failed: {e}")
+
+    return results
+
+
+def _parse_number(s):
+    """Parse number strings like '2,556' or '3.4K' into integers."""
+    s = s.strip().replace(",", "")
+    if s.endswith("K"):
+        return int(float(s[:-1]) * 1000)
+    if s.endswith("M"):
+        return int(float(s[:-1]) * 1000000)
+    try:
+        return int(s)
+    except ValueError:
+        return 0
+
+
+def _parse_pct(s):
+    """Parse percentage string like '79.2%' into float."""
+    try:
+        return float(s.strip().rstrip("%"))
+    except ValueError:
         return None
 
 
+def parse_insights_page_text(text):
+    """Parse the rendered Instagram insights page text into a structured dict."""
+    result = {
+        "accounts_reached": 0,
+        "reach_follower_pct": None,
+        "reach_non_follower_pct": None,
+        "impressions": 0,
+        "from_home": 0,
+        "from_profile": 0,
+        "from_hashtags": 0,
+        "from_explore": 0,
+        "from_other": 0,
+        "total_interactions": 0,
+        "interaction_follower_pct": None,
+        "saves": 0,
+        "shares": 0,
+        "profile_visits": 0,
+        "follows": 0,
+    }
+
+    num_pat = re.compile(r"^[\d,]+[KM]?$")
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+    for i, line in enumerate(lines):
+        # Views → impressions
+        if line == "Views" and i + 1 < len(lines) and num_pat.match(lines[i + 1]):
+            result["impressions"] = _parse_number(lines[i + 1])
+
+        # Accounts reached + follower/non-follower split
+        if line == "Accounts reached" and i + 1 < len(lines):
+            result["accounts_reached"] = _parse_number(lines[i + 1])
+            # Look backwards for reach percentages
+            for j in range(max(0, i - 6), i):
+                if lines[j] == "Followers" and j + 1 < len(lines) and "%" in lines[j + 1]:
+                    result["reach_follower_pct"] = _parse_pct(lines[j + 1])
+                elif lines[j] == "Non-followers" and j + 1 < len(lines) and "%" in lines[j + 1]:
+                    result["reach_non_follower_pct"] = _parse_pct(lines[j + 1])
+
+        # Total interactions + follower pct
+        if line == "Interactions" and i + 1 < len(lines):
+            for k in range(i + 1, min(i + 3, len(lines))):
+                if num_pat.match(lines[k]):
+                    result["total_interactions"] = _parse_number(lines[k])
+                    break
+            for j in range(i + 1, min(i + 8, len(lines))):
+                if lines[j] == "Followers" and j + 1 < len(lines) and "%" in lines[j + 1]:
+                    result["interaction_follower_pct"] = _parse_pct(lines[j + 1])
+
+        # Saves (label followed by number)
+        if line == "Saves" and i + 1 < len(lines) and num_pat.match(lines[i + 1]):
+            result["saves"] = _parse_number(lines[i + 1])
+
+        # Shares (label followed by number)
+        if line == "Shares" and i + 1 < len(lines) and num_pat.match(lines[i + 1]):
+            result["shares"] = _parse_number(lines[i + 1])
+
+        # Profile activity
+        if line == "Profile activity" and i + 1 < len(lines) and num_pat.match(lines[i + 1]):
+            result["profile_visits"] = _parse_number(lines[i + 1])
+
+        # Follows (last occurrence, after Profile activity)
+        if line == "Follows" and i + 1 < len(lines) and num_pat.match(lines[i + 1]):
+            result["follows"] = _parse_number(lines[i + 1])
+
+    # Only return if we got meaningful data
+    if result["accounts_reached"] == 0 and result["impressions"] == 0:
+        return None
+
+    return result
+
+
 def parse_insights_response(data):
-    """Parse insights API response into a flat dict."""
+    """Parse insights API response into a flat dict (legacy, kept for reference)."""
     result = {
         "accounts_reached": 0,
         "reach_follower_pct": None,
@@ -557,14 +707,18 @@ def sync_account(account, backend):
         if comments:
             logger.info(f"    {len(comments)} comments")
 
-        # Fetch insights (creator-only data)
         delay(2, 4)
-        insights = fetch_post_insights(ig_client, pid)
-        if insights:
-            post["insights"] = insights
-            logger.info(f"    Insights: reached={insights['accounts_reached']}, impressions={insights['impressions']}")
 
-        delay(2, 4)
+    # 3b. Batch-fetch insights for all new posts (single browser session)
+    new_post_pks = [p["platform_post_id"] for p in posts]
+    if new_post_pks:
+        logger.info(f"Fetching insights for {len(new_post_pks)} new posts (Playwright batch)...")
+        insights_map = fetch_batch_insights(new_post_pks)
+        for post in posts:
+            pid = post["platform_post_id"]
+            if pid in insights_map:
+                post["insights"] = insights_map[pid]
+        logger.info(f"  Got insights for {len(insights_map)}/{len(new_post_pks)} posts")
 
     # 4. Re-fetch metrics for recent existing posts
     logger.info("Re-snapshotting metrics + insights for existing posts...")
@@ -585,16 +739,23 @@ def sync_account(account, backend):
                     "reach": 0,
                 },
             }
-            # Also fetch insights for existing posts
-            delay(2, 4)
-            insights = fetch_post_insights(ig_client, pid)
-            if insights:
-                entry["insights"] = insights
-                # Update shares/saves from insights (more accurate)
-                entry["metrics"]["shares"] = insights.get("shares", 0)
-                entry["metrics"]["saves"] = insights.get("saves", 0)
-                entry["metrics"]["reach"] = insights.get("accounts_reached", 0)
             resnapshots.append(entry)
+
+    # Batch-fetch insights for existing posts too
+    resnapshot_pks = [r["platform_post_id"] for r in resnapshots]
+    if resnapshot_pks:
+        logger.info(f"Fetching insights for {len(resnapshot_pks)} existing posts (Playwright batch)...")
+        resnapshot_insights = fetch_batch_insights(resnapshot_pks)
+        for entry in resnapshots:
+            pid = entry["platform_post_id"]
+            if pid in resnapshot_insights:
+                entry["insights"] = resnapshot_insights[pid]
+                # Update shares/saves from insights (more accurate)
+                entry["metrics"]["shares"] = resnapshot_insights[pid].get("shares", 0)
+                entry["metrics"]["saves"] = resnapshot_insights[pid].get("saves", 0)
+                entry["metrics"]["reach"] = resnapshot_insights[pid].get("accounts_reached", 0)
+        logger.info(f"  Got insights for {len(resnapshot_insights)}/{len(resnapshot_pks)} existing posts")
+
     logger.info(f"  Re-snapshotted {len(resnapshots)} existing posts")
 
     ig_client.close()

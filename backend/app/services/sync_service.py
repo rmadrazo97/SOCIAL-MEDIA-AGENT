@@ -105,6 +105,16 @@ async def sync_account(account_id: UUID) -> dict:
                 except Exception as e:
                     logger.error(f"Comments fetch failed for post {sp['platform_post_id']}: {e}")
 
+            # Fetch Instagram Insights for new posts (creator-only data)
+            if is_new and account.platform == "instagram":
+                try:
+                    await instagram_web_scraper._delay(2, 4)
+                    insights = await instagram_web_scraper.get_post_insights(sp["platform_post_id"])
+                    if insights:
+                        await _snapshot_insights(db, post, insights)
+                except Exception as e:
+                    logger.error(f"Insights fetch failed for post {sp['platform_post_id']}: {e}")
+
         # 6. Re-snapshot metrics for recent existing posts (not just scraped)
         if account.platform == "instagram":
             resnapshot_count = await _resnapshot_existing_posts(db, account)
@@ -397,6 +407,15 @@ async def _resnapshot_existing_posts(db: AsyncSession, account: Account, limit: 
                 }
                 await _snapshot_metrics(db, post, metrics)
                 count += 1
+
+                # Also fetch insights for existing posts
+                try:
+                    await instagram_web_scraper._delay(2, 4)
+                    insights = await instagram_web_scraper.get_post_insights(post.platform_post_id)
+                    if insights:
+                        await _snapshot_insights(db, post, insights)
+                except Exception as e:
+                    logger.error(f"Insights re-snapshot failed for post {post.platform_post_id}: {e}")
         except Exception as e:
             logger.error(f"Re-snapshot failed for post {post.platform_post_id}: {e}")
 

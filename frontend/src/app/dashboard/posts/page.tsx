@@ -1,9 +1,11 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAccounts, usePosts } from '@/lib/hooks';
 import { api } from '@/lib/api';
-import { Eye, Heart, MessageCircle, Play, Image as ImageIcon, Layers, Film, TrendingUp } from 'lucide-react';
+import { Eye, Heart, MessageCircle, Play, Image as ImageIcon, Layers, Film, TrendingUp, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
+
+const SYNC_SERVER_URL = 'http://localhost:8002';
 
 function PostCard({ post }: { post: any }) {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
@@ -83,10 +85,69 @@ function formatNum(n: number): string {
   return n.toLocaleString();
 }
 
+type SyncStatus = 'idle' | 'starting' | 'running' | 'done' | 'error';
+
+function useSyncPoller(syncStatus: SyncStatus, onComplete: (result: any) => void) {
+  useEffect(() => {
+    if (syncStatus !== 'running') return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${SYNC_SERVER_URL}/status`);
+        const data = await res.json();
+        if (!data.running && data.last_result) {
+          onComplete(data.last_result);
+        }
+      } catch {}
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [syncStatus, onComplete]);
+}
+
 export default function PostsPage() {
   const { data: accounts } = useAccounts();
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<string>('all');
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [syncMessage, setSyncMessage] = useState<string>('');
+
+  const onSyncComplete = useCallback((result: any) => {
+    if (result.success) {
+      setSyncStatus('done');
+      setSyncMessage('Sync complete — refreshing posts...');
+      // Trigger SWR revalidation
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } else {
+      setSyncStatus('error');
+      setSyncMessage(result.error || 'Sync failed');
+    }
+  }, []);
+
+  useSyncPoller(syncStatus, onSyncComplete);
+
+  const handleSync = async () => {
+    setSyncStatus('starting');
+    setSyncMessage('');
+    try {
+      const res = await fetch(`${SYNC_SERVER_URL}/sync`, { method: 'POST' });
+      if (res.status === 409) {
+        setSyncStatus('running');
+        setSyncMessage('Sync already in progress...');
+        return;
+      }
+      if (res.ok) {
+        setSyncStatus('running');
+        setSyncMessage('Syncing Instagram posts & insights...');
+      } else {
+        setSyncStatus('error');
+        setSyncMessage('Failed to start sync');
+      }
+    } catch {
+      setSyncStatus('error');
+      setSyncMessage('Sync server not running — start it with: python scripts/sync_server.py');
+    }
+  };
 
   useEffect(() => {
     if (accounts?.length && !selectedAccount) {
@@ -121,8 +182,43 @@ export default function PostsPage() {
               ))}
             </select>
           )}
+          <button
+            onClick={handleSync}
+            disabled={syncStatus === 'starting' || syncStatus === 'running'}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              syncStatus === 'running' || syncStatus === 'starting'
+                ? 'bg-sage/30 text-dun cursor-wait'
+                : syncStatus === 'done'
+                ? 'bg-green-600/20 text-green-400'
+                : syncStatus === 'error'
+                ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+                : 'bg-sage/20 text-bone hover:bg-sage/30'
+            }`}
+          >
+            {syncStatus === 'running' || syncStatus === 'starting' ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : syncStatus === 'done' ? (
+              <CheckCircle className="w-4 h-4" />
+            ) : syncStatus === 'error' ? (
+              <AlertCircle className="w-4 h-4" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
+            {syncStatus === 'running' || syncStatus === 'starting' ? 'Syncing...' : 'Sync Instagram'}
+          </button>
         </div>
       </div>
+
+      {/* Sync status message */}
+      {syncMessage && (
+        <div className={`px-4 py-2 rounded-lg text-sm ${
+          syncStatus === 'error' ? 'bg-red-600/10 text-red-400' :
+          syncStatus === 'done' ? 'bg-green-600/10 text-green-400' :
+          'bg-sage/10 text-dun'
+        }`}>
+          {syncMessage}
+        </div>
+      )}
 
       {/* Type filters */}
       {posts?.length > 0 && (

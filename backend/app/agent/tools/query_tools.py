@@ -216,6 +216,7 @@ async def get_post_detail(post_id: str) -> str:
         if insight:
             result_data["insights"] = {
                 "accounts_reached": insight.accounts_reached,
+                "reach_follower_pct": float(insight.reach_follower_pct) if insight.reach_follower_pct else None,
                 "reach_non_follower_pct": float(insight.reach_non_follower_pct) if insight.reach_non_follower_pct else None,
                 "impressions": insight.impressions,
                 "from_explore": insight.from_explore,
